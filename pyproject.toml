@@ -72,8 +72,25 @@ instruments = [
     "opentelemetry-instrumentation >= 0.41b0",
     "opentelemetry-instrumentation-fastapi >= 0.41b0",
     "opentelemetry-instrumentation-requests >= 0.41b0",
+    "opentelemetry-instrumentation-httpx >= 0.41b0",
     "opentelemetry-instrumentation-flask >= 0.41b0",
+    "opentelemetry-instrumentation-django >= 0.41b0",
     "opentelemetry-instrumentation-urllib3 >= 0.41b0",
+    "opentelemetry-instrumentation-starlette >= 0.41b0",
+    "opentelemetry-instrumentation-sqlalchemy >= 0.41b0",
+    "opentelemetry-instrumentation-redis >= 0.41b0",
+    "opentelemetry-instrumentation-celery >= 0.41b0",
+    "opentelemetry-instrumentation-grpc >= 0.41b0",
+    "opentelemetry-instrumentation-logging >= 0.41b0",
+]
+
+# GenAI / AI model auto-instrumentation
+genai = [
+    "opentelemetry-instrumentation-openai-v2 >= 2.0b0",
+    "opentelemetry-instrumentation-anthropic >= 0.1b0",
+    "opentelemetry-instrumentation-vertexai >= 0.1b0",
+    "opentelemetry-instrumentation-google-genai >= 0.1b0",
+    "opentelemetry-instrumentation-langchain >= 0.1b0",
 ]
 
 # Cross-service carrier propagation (SQS, Kafka, Celery, Redis)
@@ -84,7 +101,7 @@ carriers = [
 
 # Everything
 all = [
-    "botanu[sdk,instruments,carriers]",
+    "botanu[sdk,instruments,genai,carriers]",
 ]
 
 # Development / CI
