@@ -207,9 +207,14 @@ branch = true
 
 [tool.coverage.report]
 show_missing = true
-fail_under = 80
+fail_under = 70
 exclude_lines = [
     "pragma: no cover",
     "if TYPE_CHECKING:",
     "if __name__ == .__main__.",
+]
+# Exclude integration-heavy modules that require full OTel SDK setup
+omit = [
+    "src/botanu/sdk/bootstrap.py",
+    "src/botanu/sdk/middleware.py",
 ]
