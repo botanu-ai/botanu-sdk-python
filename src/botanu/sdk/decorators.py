@@ -98,7 +98,8 @@ def botanu_use_case(
             )
 
             with tracer.start_as_current_span(
-                name=f"botanu.run/{name}", kind=span_kind,
+                name=f"botanu.run/{name}",
+                kind=span_kind,
             ) as span:
                 for key, value in run_ctx.to_span_attributes().items():
                     span.set_attribute(key, value)
@@ -119,9 +120,7 @@ def botanu_use_case(
                     result = await func(*args, **kwargs)
 
                     span_attrs = getattr(span, "attributes", None)
-                    existing_outcome = (
-                        span_attrs.get("botanu.outcome.status") if span_attrs else None
-                    )
+                    existing_outcome = span_attrs.get("botanu.outcome.status") if span_attrs else None
 
                     if existing_outcome is None and auto_outcome_on_success:
                         run_ctx.complete(RunStatus.SUCCESS)
@@ -135,7 +134,10 @@ def botanu_use_case(
                     span.record_exception(exc)
                     run_ctx.complete(RunStatus.FAILURE, error_class=exc.__class__.__name__)
                     _emit_run_completed(
-                        span, run_ctx, RunStatus.FAILURE, error_class=exc.__class__.__name__,
+                        span,
+                        run_ctx,
+                        RunStatus.FAILURE,
+                        error_class=exc.__class__.__name__,
                     )
                     raise
 
@@ -152,7 +154,8 @@ def botanu_use_case(
             )
 
             with tracer.start_as_current_span(
-                name=f"botanu.run/{name}", kind=span_kind,
+                name=f"botanu.run/{name}",
+                kind=span_kind,
             ) as span:
                 for key, value in run_ctx.to_span_attributes().items():
                     span.set_attribute(key, value)
@@ -173,9 +176,7 @@ def botanu_use_case(
                     result = func(*args, **kwargs)
 
                     span_attrs = getattr(span, "attributes", None)
-                    existing_outcome = (
-                        span_attrs.get("botanu.outcome.status") if span_attrs else None
-                    )
+                    existing_outcome = span_attrs.get("botanu.outcome.status") if span_attrs else None
 
                     if existing_outcome is None and auto_outcome_on_success:
                         run_ctx.complete(RunStatus.SUCCESS)
@@ -189,7 +190,10 @@ def botanu_use_case(
                     span.record_exception(exc)
                     run_ctx.complete(RunStatus.FAILURE, error_class=exc.__class__.__name__)
                     _emit_run_completed(
-                        span, run_ctx, RunStatus.FAILURE, error_class=exc.__class__.__name__,
+                        span,
+                        run_ctx,
+                        RunStatus.FAILURE,
+                        error_class=exc.__class__.__name__,
                     )
                     raise
 

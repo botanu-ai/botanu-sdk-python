@@ -11,7 +11,6 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
-
 # Module-level provider and exporter to avoid "cannot override" warnings
 _provider: TracerProvider = None
 _exporter: InMemorySpanExporter = None

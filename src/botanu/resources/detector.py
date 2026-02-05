@@ -21,7 +21,6 @@ import sys
 from functools import lru_cache
 from typing import Any, Dict, Optional
 
-
 # =========================================================================
 # Environment Variable Mappings
 # =========================================================================
@@ -153,23 +152,31 @@ def detect_cloud_provider() -> Dict[str, Any]:
 
 def _is_aws() -> bool:
     indicators = [
-        "AWS_REGION", "AWS_DEFAULT_REGION", "AWS_LAMBDA_FUNCTION_NAME",
-        "ECS_CONTAINER_METADATA_URI", "AWS_EXECUTION_ENV",
+        "AWS_REGION",
+        "AWS_DEFAULT_REGION",
+        "AWS_LAMBDA_FUNCTION_NAME",
+        "ECS_CONTAINER_METADATA_URI",
+        "AWS_EXECUTION_ENV",
     ]
     return any(os.environ.get(var) for var in indicators)
 
 
 def _is_gcp() -> bool:
     indicators = [
-        "GOOGLE_CLOUD_PROJECT", "GCLOUD_PROJECT", "GCP_PROJECT",
-        "K_SERVICE", "FUNCTION_NAME",
+        "GOOGLE_CLOUD_PROJECT",
+        "GCLOUD_PROJECT",
+        "GCP_PROJECT",
+        "K_SERVICE",
+        "FUNCTION_NAME",
     ]
     return any(os.environ.get(var) for var in indicators)
 
 
 def _is_azure() -> bool:
     indicators = [
-        "WEBSITE_SITE_NAME", "AZURE_FUNCTIONS_ENVIRONMENT", "AZURE_SUBSCRIPTION_ID",
+        "WEBSITE_SITE_NAME",
+        "AZURE_FUNCTIONS_ENVIRONMENT",
+        "AZURE_SUBSCRIPTION_ID",
     ]
     return any(os.environ.get(var) for var in indicators)
 

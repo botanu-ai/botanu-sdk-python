@@ -71,37 +71,39 @@ class BotanuConfig:
     propagation_mode: str = "lean"
 
     # Auto-instrumentation packages to enable
-    auto_instrument_packages: List[str] = field(default_factory=lambda: [
-        # HTTP clients
-        "requests",
-        "httpx",
-        "urllib3",
-        "aiohttp_client",
-        # Web frameworks
-        "fastapi",
-        "flask",
-        "django",
-        "starlette",
-        # Databases
-        "sqlalchemy",
-        "psycopg2",
-        "asyncpg",
-        "pymongo",
-        "redis",
-        # Messaging
-        "celery",
-        "kafka_python",
-        # gRPC
-        "grpc",
-        # GenAI / AI
-        "openai_v2",
-        "anthropic",
-        "vertexai",
-        "google_genai",
-        "langchain",
-        # Runtime
-        "logging",
-    ])
+    auto_instrument_packages: List[str] = field(
+        default_factory=lambda: [
+            # HTTP clients
+            "requests",
+            "httpx",
+            "urllib3",
+            "aiohttp_client",
+            # Web frameworks
+            "fastapi",
+            "flask",
+            "django",
+            "starlette",
+            # Databases
+            "sqlalchemy",
+            "psycopg2",
+            "asyncpg",
+            "pymongo",
+            "redis",
+            # Messaging
+            "celery",
+            "kafka_python",
+            # gRPC
+            "grpc",
+            # GenAI / AI
+            "openai_v2",
+            "anthropic",
+            "vertexai",
+            "google_genai",
+            "langchain",
+            # Runtime
+            "logging",
+        ]
+    )
 
     # Config file path (for tracking where config was loaded from)
     _config_file: Optional[str] = field(default=None, repr=False)
@@ -169,10 +171,8 @@ class BotanuConfig:
 
         try:
             import yaml  # type: ignore[import-untyped]
-        except ImportError:
-            raise ImportError(
-                "PyYAML required for YAML config. Install with: pip install pyyaml"
-            )
+        except ImportError as err:
+            raise ImportError("PyYAML required for YAML config. Install with: pip install pyyaml") from err
 
         with open(resolved) as fh:
             raw_content = fh.read()
@@ -182,7 +182,7 @@ class BotanuConfig:
         try:
             data = yaml.safe_load(content)
         except yaml.YAMLError as exc:
-            raise ValueError(f"Invalid YAML in {resolved}: {exc}")
+            raise ValueError(f"Invalid YAML in {resolved}: {exc}") from exc
 
         if data is None:
             data = {}
@@ -209,12 +209,14 @@ class BotanuConfig:
         if env_path:
             search_paths.append(Path(env_path))
 
-        search_paths.extend([
-            Path("botanu.yaml"),
-            Path("botanu.yml"),
-            Path("config/botanu.yaml"),
-            Path("config/botanu.yml"),
-        ])
+        search_paths.extend(
+            [
+                Path("botanu.yaml"),
+                Path("botanu.yml"),
+                Path("config/botanu.yaml"),
+                Path("config/botanu.yml"),
+            ]
+        )
 
         for candidate in search_paths:
             if candidate.exists():
@@ -252,9 +254,7 @@ class BotanuConfig:
             schedule_delay_millis=export.get("delay_ms", 5000),
             trace_sample_rate=sampling.get("rate", 1.0),
             propagation_mode=propagation.get("mode", "lean"),
-            auto_instrument_packages=(
-                auto_packages if auto_packages else BotanuConfig().auto_instrument_packages
-            ),
+            auto_instrument_packages=(auto_packages if auto_packages else BotanuConfig().auto_instrument_packages),
             _config_file=config_file,
         )
 

@@ -8,10 +8,10 @@ Uses OpenTelemetry Context and Baggage for propagation.
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, cast
 
 from opentelemetry import baggage, trace
-from opentelemetry.context import attach, detach, get_current
+from opentelemetry.context import attach, get_current
 
 
 def set_baggage(key: str, value: str) -> object:
@@ -40,7 +40,8 @@ def get_baggage(key: str) -> Optional[str]:
     Returns:
         Baggage value or ``None`` if not set.
     """
-    return baggage.get_baggage(key, context=get_current())
+    value = baggage.get_baggage(key, context=get_current())
+    return cast(Optional[str], value)
 
 
 def get_current_span() -> trace.Span:

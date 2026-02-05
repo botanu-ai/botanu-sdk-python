@@ -18,7 +18,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Dict, Optional, Union
+from typing import Dict, Optional, Union
 
 
 def generate_run_id() -> str:
@@ -123,12 +123,7 @@ class RunContext:
         deadline_seconds: Optional[float] = None,
     ) -> RunContext:
         """Create a new RunContext with auto-generated run_id."""
-        env = (
-            environment
-            or os.getenv("BOTANU_ENVIRONMENT")
-            or os.getenv("DEPLOYMENT_ENVIRONMENT")
-            or "production"
-        )
+        env = environment or os.getenv("BOTANU_ENVIRONMENT") or os.getenv("DEPLOYMENT_ENVIRONMENT") or "production"
         run_id = generate_run_id()
         deadline = None
         if deadline_seconds is not None:

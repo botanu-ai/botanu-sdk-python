@@ -10,11 +10,8 @@ import re
 import time
 from unittest import mock
 
-import pytest
-
 from botanu.models.run_context import (
     RunContext,
-    RunOutcome,
     RunStatus,
     generate_run_id,
 )

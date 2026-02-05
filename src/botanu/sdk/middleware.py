@@ -67,20 +67,9 @@ class BotanuMiddleware(BaseHTTPMiddleware):
         if not run_id and self.auto_generate_run_id:
             run_id = str(uuid.uuid4())
 
-        use_case = (
-            baggage.get_baggage("botanu.use_case")
-            or request.headers.get("x-botanu-use-case")
-            or self.use_case
-        )
-        workflow = (
-            baggage.get_baggage("botanu.workflow")
-            or request.headers.get("x-botanu-workflow")
-            or self.workflow
-        )
-        customer_id = (
-            baggage.get_baggage("botanu.customer_id")
-            or request.headers.get("x-botanu-customer-id")
-        )
+        use_case = baggage.get_baggage("botanu.use_case") or request.headers.get("x-botanu-use-case") or self.use_case
+        workflow = baggage.get_baggage("botanu.workflow") or request.headers.get("x-botanu-workflow") or self.workflow
+        customer_id = baggage.get_baggage("botanu.customer_id") or request.headers.get("x-botanu-customer-id")
 
         # Enrich span with Botanu attributes
         if run_id:
