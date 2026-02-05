@@ -22,44 +22,73 @@ from typing import Any, Dict, Generator, Optional
 from opentelemetry import trace
 from opentelemetry.trace import Span, SpanKind, Status, StatusCode
 
-
 # =========================================================================
 # System Normalization Maps
 # =========================================================================
 
 DB_SYSTEMS: Dict[str, str] = {
-    "postgresql": "postgresql", "postgres": "postgresql", "pg": "postgresql",
-    "mysql": "mysql", "mariadb": "mariadb",
-    "mssql": "mssql", "sqlserver": "mssql",
-    "oracle": "oracle", "sqlite": "sqlite",
-    "mongodb": "mongodb", "mongo": "mongodb",
-    "dynamodb": "dynamodb", "cassandra": "cassandra",
-    "couchdb": "couchdb", "firestore": "firestore", "cosmosdb": "cosmosdb",
-    "redis": "redis", "memcached": "memcached", "elasticache": "elasticache",
-    "elasticsearch": "elasticsearch", "opensearch": "opensearch",
-    "snowflake": "snowflake", "bigquery": "bigquery",
-    "redshift": "redshift", "databricks": "databricks",
-    "athena": "athena", "synapse": "synapse",
-    "influxdb": "influxdb", "timescaledb": "timescaledb",
-    "neo4j": "neo4j", "neptune": "neptune",
+    "postgresql": "postgresql",
+    "postgres": "postgresql",
+    "pg": "postgresql",
+    "mysql": "mysql",
+    "mariadb": "mariadb",
+    "mssql": "mssql",
+    "sqlserver": "mssql",
+    "oracle": "oracle",
+    "sqlite": "sqlite",
+    "mongodb": "mongodb",
+    "mongo": "mongodb",
+    "dynamodb": "dynamodb",
+    "cassandra": "cassandra",
+    "couchdb": "couchdb",
+    "firestore": "firestore",
+    "cosmosdb": "cosmosdb",
+    "redis": "redis",
+    "memcached": "memcached",
+    "elasticache": "elasticache",
+    "elasticsearch": "elasticsearch",
+    "opensearch": "opensearch",
+    "snowflake": "snowflake",
+    "bigquery": "bigquery",
+    "redshift": "redshift",
+    "databricks": "databricks",
+    "athena": "athena",
+    "synapse": "synapse",
+    "influxdb": "influxdb",
+    "timescaledb": "timescaledb",
+    "neo4j": "neo4j",
+    "neptune": "neptune",
 }
 
 STORAGE_SYSTEMS: Dict[str, str] = {
-    "s3": "s3", "aws_s3": "s3",
-    "gcs": "gcs", "google_cloud_storage": "gcs",
-    "blob": "azure_blob", "azure_blob": "azure_blob",
-    "minio": "minio", "ceph": "ceph",
-    "nfs": "nfs", "efs": "efs",
+    "s3": "s3",
+    "aws_s3": "s3",
+    "gcs": "gcs",
+    "google_cloud_storage": "gcs",
+    "blob": "azure_blob",
+    "azure_blob": "azure_blob",
+    "minio": "minio",
+    "ceph": "ceph",
+    "nfs": "nfs",
+    "efs": "efs",
 }
 
 MESSAGING_SYSTEMS: Dict[str, str] = {
-    "sqs": "sqs", "aws_sqs": "sqs",
-    "sns": "sns", "kinesis": "kinesis", "eventbridge": "eventbridge",
-    "pubsub": "pubsub", "google_pubsub": "pubsub",
-    "servicebus": "servicebus", "azure_servicebus": "servicebus",
+    "sqs": "sqs",
+    "aws_sqs": "sqs",
+    "sns": "sns",
+    "kinesis": "kinesis",
+    "eventbridge": "eventbridge",
+    "pubsub": "pubsub",
+    "google_pubsub": "pubsub",
+    "servicebus": "servicebus",
+    "azure_servicebus": "servicebus",
     "eventhub": "eventhub",
-    "kafka": "kafka", "rabbitmq": "rabbitmq", "nats": "nats",
-    "redis_pubsub": "redis_pubsub", "celery": "celery",
+    "kafka": "kafka",
+    "rabbitmq": "rabbitmq",
+    "nats": "nats",
+    "redis_pubsub": "redis_pubsub",
+    "celery": "celery",
 }
 
 
@@ -194,7 +223,8 @@ def track_db_operation(
     normalized_system = DB_SYSTEMS.get(system.lower(), system.lower())
 
     with tracer.start_as_current_span(
-        name=f"db.{normalized_system}.{operation.lower()}", kind=SpanKind.CLIENT,
+        name=f"db.{normalized_system}.{operation.lower()}",
+        kind=SpanKind.CLIENT,
     ) as span:
         span.set_attribute("db.system", normalized_system)
         span.set_attribute("db.operation", operation.upper())
@@ -292,7 +322,8 @@ def track_storage_operation(
     normalized_system = STORAGE_SYSTEMS.get(system.lower(), system.lower())
 
     with tracer.start_as_current_span(
-        name=f"storage.{normalized_system}.{operation.lower()}", kind=SpanKind.CLIENT,
+        name=f"storage.{normalized_system}.{operation.lower()}",
+        kind=SpanKind.CLIENT,
     ) as span:
         span.set_attribute("botanu.storage.system", normalized_system)
         span.set_attribute("botanu.storage.operation", operation.upper())
@@ -382,7 +413,8 @@ def track_messaging_operation(
     span_kind = SpanKind.PRODUCER if operation in ("publish", "send") else SpanKind.CONSUMER
 
     with tracer.start_as_current_span(
-        name=f"messaging.{normalized_system}.{operation.lower()}", kind=span_kind,
+        name=f"messaging.{normalized_system}.{operation.lower()}",
+        kind=span_kind,
     ) as span:
         span.set_attribute("messaging.system", normalized_system)
         span.set_attribute("messaging.operation", operation.lower())

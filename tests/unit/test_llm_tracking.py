@@ -38,7 +38,7 @@ class TestTrackLLMCall:
 
     def test_records_error_on_exception(self, memory_exporter):
         with pytest.raises(ValueError):
-            with track_llm_call(model="gpt-4", provider="openai") as tracker:
+            with track_llm_call(model="gpt-4", provider="openai") as _tracker:
                 raise ValueError("API error")
 
         spans = memory_exporter.get_finished_spans()

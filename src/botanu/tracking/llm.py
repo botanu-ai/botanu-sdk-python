@@ -30,7 +30,6 @@ from typing import Any, Dict, Generator, List, Optional
 from opentelemetry import metrics, trace
 from opentelemetry.trace import Span, SpanKind, Status, StatusCode
 
-
 # =========================================================================
 # OTel GenAI Semantic Convention Attribute Names
 # =========================================================================
@@ -678,10 +677,8 @@ def llm_instrumented(
                 if tokens_from_response and hasattr(response, "usage"):
                     usage = response.usage
                     tracker.set_tokens(
-                        input_tokens=getattr(usage, "prompt_tokens", 0)
-                        or getattr(usage, "input_tokens", 0),
-                        output_tokens=getattr(usage, "completion_tokens", 0)
-                        or getattr(usage, "output_tokens", 0),
+                        input_tokens=getattr(usage, "prompt_tokens", 0) or getattr(usage, "input_tokens", 0),
+                        output_tokens=getattr(usage, "completion_tokens", 0) or getattr(usage, "output_tokens", 0),
                     )
 
                 return response

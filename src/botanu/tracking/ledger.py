@@ -69,9 +69,9 @@ class AttemptLedger:
     def _initialize_logger(self) -> None:
         try:
             from opentelemetry._logs import get_logger_provider, set_logger_provider
+            from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
             from opentelemetry.sdk._logs import LoggerProvider
             from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
-            from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 
             provider = get_logger_provider()
 

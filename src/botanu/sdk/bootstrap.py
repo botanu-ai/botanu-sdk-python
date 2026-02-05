@@ -20,7 +20,6 @@ Usage::
 from __future__ import annotations
 
 import logging
-import os
 from typing import TYPE_CHECKING, List, Optional
 
 if TYPE_CHECKING:
@@ -158,10 +157,12 @@ def enable(
 
         # Propagators (W3C TraceContext + Baggage)
         set_global_textmap(
-            CompositePropagator([
-                TraceContextTextMapPropagator(),
-                W3CBaggagePropagator(),
-            ])
+            CompositePropagator(
+                [
+                    TraceContextTextMapPropagator(),
+                    W3CBaggagePropagator(),
+                ]
+            )
         )
 
         logger.info("Botanu SDK tracing initialized")
@@ -190,7 +191,9 @@ def _enable_auto_instrumentation() -> None:
     _try_instrument(enabled, failed, "httpx", "opentelemetry.instrumentation.httpx", "HTTPXClientInstrumentation")
     _try_instrument(enabled, failed, "requests", "opentelemetry.instrumentation.requests", "RequestsInstrumentor")
     _try_instrument(enabled, failed, "urllib3", "opentelemetry.instrumentation.urllib3", "URLLib3Instrumentor")
-    _try_instrument(enabled, failed, "aiohttp", "opentelemetry.instrumentation.aiohttp_client", "AioHttpClientInstrumentor")
+    _try_instrument(
+        enabled, failed, "aiohttp", "opentelemetry.instrumentation.aiohttp_client", "AioHttpClientInstrumentor"
+    )
 
     # Web frameworks
     _try_instrument(enabled, failed, "fastapi", "opentelemetry.instrumentation.fastapi", "FastAPIInstrumentor")
@@ -216,7 +219,9 @@ def _enable_auto_instrumentation() -> None:
     _try_instrument(enabled, failed, "openai", "opentelemetry.instrumentation.openai_v2", "OpenAIInstrumentor")
     _try_instrument(enabled, failed, "anthropic", "opentelemetry.instrumentation.anthropic", "AnthropicInstrumentor")
     _try_instrument(enabled, failed, "vertexai", "opentelemetry.instrumentation.vertexai", "VertexAIInstrumentor")
-    _try_instrument(enabled, failed, "google_genai", "opentelemetry.instrumentation.google_genai", "GoogleGenAiInstrumentor")
+    _try_instrument(
+        enabled, failed, "google_genai", "opentelemetry.instrumentation.google_genai", "GoogleGenAiInstrumentor"
+    )
     _try_instrument(enabled, failed, "langchain", "opentelemetry.instrumentation.langchain", "LangchainInstrumentor")
 
     # Runtime

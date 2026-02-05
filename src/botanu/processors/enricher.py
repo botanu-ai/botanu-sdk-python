@@ -17,10 +17,10 @@ All heavy processing should happen in the OTel Collector:
 from __future__ import annotations
 
 import logging
-from typing import List, Optional
+from typing import ClassVar, List, Optional
 
 from opentelemetry import baggage, context
-from opentelemetry.sdk.trace import SpanProcessor, ReadableSpan
+from opentelemetry.sdk.trace import ReadableSpan, SpanProcessor
 from opentelemetry.trace import Span
 
 logger = logging.getLogger(__name__)
@@ -39,7 +39,7 @@ class RunContextEnricher(SpanProcessor):
     propagated to minimise per-span overhead.
     """
 
-    BAGGAGE_KEYS_FULL: List[str] = [
+    BAGGAGE_KEYS_FULL: ClassVar[List[str]] = [
         "botanu.run_id",
         "botanu.use_case",
         "botanu.workflow",
@@ -48,7 +48,7 @@ class RunContextEnricher(SpanProcessor):
         "botanu.parent_run_id",
     ]
 
-    BAGGAGE_KEYS_LEAN: List[str] = [
+    BAGGAGE_KEYS_LEAN: ClassVar[List[str]] = [
         "botanu.run_id",
         "botanu.use_case",
     ]
