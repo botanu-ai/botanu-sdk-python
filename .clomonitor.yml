@@ -1,0 +1,27 @@
+# SPDX-FileCopyrightText: 2026 The Botanu Authors
+# SPDX-License-Identifier: Apache-2.0
+#
+# CLOMonitor metadata — used by LF AI & Data Foundation to track
+# project maturity and best-practice adoption.
+# See: https://clomonitor.io/docs/topics/checks/
+
+# Documentation
+documentation:
+  adopters: "https://github.com/botanu-ai/botanu-sdk-python/blob/main/ADOPTERS.md"
+  changelog: "https://github.com/botanu-ai/botanu-sdk-python/blob/main/CHANGELOG.md"
+  code_of_conduct: "https://github.com/botanu-ai/botanu-sdk-python/blob/main/CODE_OF_CONDUCT.md"
+  contributing: "https://github.com/botanu-ai/botanu-sdk-python/blob/main/CONTRIBUTING.md"
+  governance: "https://github.com/botanu-ai/botanu-sdk-python/blob/main/GOVERNANCE.md"
+  maintainers: "https://github.com/botanu-ai/botanu-sdk-python/blob/main/MAINTAINERS.md"
+  readme: "https://github.com/botanu-ai/botanu-sdk-python/blob/main/README.md"
+  security: "https://github.com/botanu-ai/botanu-sdk-python/blob/main/SECURITY.md"
+
+# License
+license:
+  approved: true
+  spdx_id: "Apache-2.0"
+
+# Best practices
+best_practices:
+  dco: true
+  openssf_badge: false  # TODO: apply at https://www.bestpractices.dev/
