@@ -14,21 +14,16 @@ Botanu adds **runs** on top of distributed tracing. A run represents a single bu
 ## Quick Start
 
 ```python
-from botanu import enable, botanu_use_case, emit_outcome
+from botanu import enable, botanu_use_case
 
 enable(service_name="my-app")
 
-@botanu_use_case(name="Customer Support")
-async def handle_ticket(ticket_id: str):
-    # All LLM calls, DB queries, and HTTP requests inside
-    # are automatically instrumented and linked to this run
-    context = await fetch_context(ticket_id)
-    response = await generate_response(context)
-    emit_outcome("success", value_type="tickets_resolved", value_amount=1)
-    return response
+@botanu_use_case(name="process_order")
+def process_order(order_id: str):
+    order = db.get_order(order_id)
+    result = llm.analyze(order)
+    return result
 ```
-
-That's it. All operations within the use case are automatically tracked.
 
 ## Installation
 
@@ -57,13 +52,21 @@ No manual instrumentation required.
 
 ## Kubernetes Deployment
 
-For large-scale deployments, use zero-code instrumentation via OTel Operator:
+For large-scale deployments (2000+ services):
+
+| Service Type | Code Change | Kubernetes Config |
+|--------------|-------------|-------------------|
+| Entry point | `@botanu_use_case` decorator | Annotation |
+| Intermediate | None | Annotation only |
 
 ```yaml
+# Intermediate services - annotation only, no code changes
 metadata:
   annotations:
     instrumentation.opentelemetry.io/inject-python: "true"
 ```
+
+Auto-instrumentation captures all HTTP calls including retries (requests, httpx, aiohttp, urllib3).
 
 See [Kubernetes Deployment Guide](./docs/integration/kubernetes.md) for details.
 
