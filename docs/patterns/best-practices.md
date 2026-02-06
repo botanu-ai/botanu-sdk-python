@@ -276,18 +276,6 @@ export OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:4318
 export BOTANU_ENVIRONMENT=production
 ```
 
-### Never Sample for Cost Attribution
-
-Always use 100% sampling for accurate cost data:
-
-```python
-# GOOD
-trace_sample_rate: float = 1.0
-
-# BAD - Missing cost data
-trace_sample_rate: float = 0.1  # Only 10% of costs captured
-```
-
 ### Use YAML for Complex Configuration
 
 For multi-environment setups:

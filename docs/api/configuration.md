@@ -22,7 +22,6 @@ from botanu.sdk.config import BotanuConfig
 | `max_export_batch_size` | `int` | `512` | Max spans per batch |
 | `max_queue_size` | `int` | `2048` | Max spans in queue |
 | `schedule_delay_millis` | `int` | `5000` | Delay between batch exports |
-| `trace_sample_rate` | `float` | `1.0` | Sampling rate (1.0 = 100%) |
 | `propagation_mode` | `str` | `"lean"` | `"lean"` or `"full"` |
 | `auto_instrument_packages` | `list` | `[...]` | Packages to auto-instrument |
 
@@ -136,9 +135,6 @@ export:
   batch_size: integer       # Max spans per batch
   queue_size: integer       # Max spans in queue
   delay_ms: integer         # Delay between exports
-
-sampling:
-  rate: float               # Sampling rate (0.0-1.0)
 
 propagation:
   mode: string              # "lean" or "full"
@@ -294,7 +290,6 @@ if not is_enabled():
 |----------|-------------|---------|
 | `BOTANU_ENVIRONMENT` | Fallback for environment | `"production"` |
 | `BOTANU_PROPAGATION_MODE` | `"lean"` or `"full"` | `"lean"` |
-| `BOTANU_TRACE_SAMPLE_RATE` | Sampling rate (0.0-1.0) | `"1.0"` |
 | `BOTANU_AUTO_DETECT_RESOURCES` | Auto-detect cloud resources | `"true"` |
 | `BOTANU_CONFIG_FILE` | Path to YAML config file | None |
 

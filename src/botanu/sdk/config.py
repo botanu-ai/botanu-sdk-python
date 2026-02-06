@@ -64,9 +64,6 @@ class BotanuConfig:
     max_queue_size: int = 2048
     schedule_delay_millis: int = 5000
 
-    # Sampling (1.0 = 100% — never sample for cost attribution)
-    trace_sample_rate: float = 1.0
-
     # Propagation mode: "lean" (run_id + use_case only) or "full" (all context)
     propagation_mode: str = "lean"
 
@@ -140,10 +137,6 @@ class BotanuConfig:
         env_propagation_mode = os.getenv("BOTANU_PROPAGATION_MODE")
         if env_propagation_mode and env_propagation_mode in ("lean", "full"):
             self.propagation_mode = env_propagation_mode
-
-        env_sample_rate = os.getenv("BOTANU_TRACE_SAMPLE_RATE")
-        if env_sample_rate:
-            self.trace_sample_rate = float(env_sample_rate)
 
     # ------------------------------------------------------------------
     # YAML loading
@@ -236,7 +229,6 @@ class BotanuConfig:
         service = data.get("service", {})
         otlp = data.get("otlp", {})
         export = data.get("export", {})
-        sampling = data.get("sampling", {})
         propagation = data.get("propagation", {})
         resource = data.get("resource", {})
         auto_packages = data.get("auto_instrument_packages")
@@ -252,7 +244,6 @@ class BotanuConfig:
             max_export_batch_size=export.get("batch_size", 512),
             max_queue_size=export.get("queue_size", 2048),
             schedule_delay_millis=export.get("delay_ms", 5000),
-            trace_sample_rate=sampling.get("rate", 1.0),
             propagation_mode=propagation.get("mode", "lean"),
             auto_instrument_packages=(auto_packages if auto_packages else BotanuConfig().auto_instrument_packages),
             _config_file=config_file,
@@ -278,9 +269,6 @@ class BotanuConfig:
                 "batch_size": self.max_export_batch_size,
                 "queue_size": self.max_queue_size,
                 "delay_ms": self.schedule_delay_millis,
-            },
-            "sampling": {
-                "rate": self.trace_sample_rate,
             },
             "propagation": {
                 "mode": self.propagation_mode,

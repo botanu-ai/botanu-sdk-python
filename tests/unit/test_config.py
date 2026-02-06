@@ -53,7 +53,6 @@ class TestBotanuConfigDefaults:
             assert config.service_name == "unknown_service"
             assert config.deployment_environment == "production"
             assert config.propagation_mode == "lean"
-            assert config.trace_sample_rate == 1.0
             assert config.auto_detect_resources is True
 
     def test_env_var_service_name(self):
@@ -84,11 +83,6 @@ class TestBotanuConfigDefaults:
         with mock.patch.dict(os.environ, {"OTEL_SERVICE_NAME": "env-service"}):
             config = BotanuConfig(service_name="explicit-service")
             assert config.service_name == "explicit-service"
-
-    def test_env_var_sample_rate(self):
-        with mock.patch.dict(os.environ, {"BOTANU_TRACE_SAMPLE_RATE": "0.5"}):
-            config = BotanuConfig()
-            assert config.trace_sample_rate == 0.5
 
     def test_env_var_propagation_mode(self):
         with mock.patch.dict(os.environ, {"BOTANU_PROPAGATION_MODE": "full"}):

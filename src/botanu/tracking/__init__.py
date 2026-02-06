@@ -7,7 +7,6 @@ Provides tracking for different operation types:
 - LLM/GenAI model calls
 - Database, storage, and messaging operations
 - Attempt ledger for durable cost tracking
-- Run completion metrics
 """
 
 from __future__ import annotations
@@ -44,7 +43,6 @@ from botanu.tracking.llm import (
     track_llm_call,
     track_tool_call,
 )
-from botanu.tracking.metrics import record_run_completed
 
 __all__ = [
     # LLM tracking
@@ -76,6 +74,4 @@ __all__ = [
     "record_tool_attempted",
     "LedgerEventType",
     "AttemptStatus",
-    # Metrics
-    "record_run_completed",
 ]

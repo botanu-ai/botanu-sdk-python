@@ -81,9 +81,6 @@ class BotanuConfig:
     max_queue_size: int = 2048
     schedule_delay_millis: int = 5000
 
-    # Sampling (1.0 = 100%)
-    trace_sample_rate: float = 1.0    # BOTANU_TRACE_SAMPLE_RATE
-
     # Propagation mode
     propagation_mode: str = "lean"    # BOTANU_PROPAGATION_MODE
 
@@ -110,7 +107,6 @@ class BotanuConfig:
 |----------|-------------|---------|
 | `BOTANU_ENVIRONMENT` | Fallback for environment | `production` |
 | `BOTANU_PROPAGATION_MODE` | `lean` or `full` | `lean` |
-| `BOTANU_TRACE_SAMPLE_RATE` | Sampling rate (0.0-1.0) | `1.0` |
 | `BOTANU_AUTO_DETECT_RESOURCES` | Auto-detect cloud resources | `true` |
 | `BOTANU_CONFIG_FILE` | Path to YAML config | None |
 
@@ -138,9 +134,6 @@ export:
   batch_size: 512
   queue_size: 2048
   delay_ms: 5000
-
-sampling:
-  rate: 1.0
 
 propagation:
   mode: lean
@@ -258,16 +251,6 @@ enable(
     auto_instrument_packages=[],  # Empty list disables
 )
 ```
-
-## Sampling
-
-For cost attribution, **always use 100% sampling** (the default):
-
-```python
-trace_sample_rate: float = 1.0  # Never miss a transaction
-```
-
-If you must sample, understand that cost calculations will be incomplete.
 
 ## Exporting Configuration
 

@@ -238,26 +238,6 @@ track_llm_call(provider="azure_openai", ...)
 
 ### Sampling for Cost Attribution
 
-**Don't** sample spans:
-
-```python
-# BAD - Missing cost data
-enable(
-    service_name="my-service",
-    trace_sample_rate=0.1,  # Only 10% of costs captured!
-)
-```
-
-**Do** use 100% sampling:
-
-```python
-# GOOD - Complete cost data
-enable(
-    service_name="my-service",
-    trace_sample_rate=1.0,  # Default - don't change
-)
-```
-
 ### Hardcoding Configuration
 
 **Don't** hardcode production values:

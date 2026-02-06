@@ -24,7 +24,6 @@ from opentelemetry.trace import SpanKind, Status, StatusCode
 
 from botanu.models.run_context import RunContext, RunStatus
 from botanu.sdk.context import get_baggage, set_baggage
-from botanu.tracking.metrics import record_run_completed
 
 T = TypeVar("T")
 
@@ -120,7 +119,7 @@ def botanu_use_case(
                     result = await func(*args, **kwargs)
 
                     span_attrs = getattr(span, "attributes", None)
-                    existing_outcome = span_attrs.get("botanu.outcome.status") if span_attrs else None
+                    existing_outcome = span_attrs.get("botanu.outcome.status") if isinstance(span_attrs, dict) else None
 
                     if existing_outcome is None and auto_outcome_on_success:
                         run_ctx.complete(RunStatus.SUCCESS)
@@ -176,7 +175,7 @@ def botanu_use_case(
                     result = func(*args, **kwargs)
 
                     span_attrs = getattr(span, "attributes", None)
-                    existing_outcome = span_attrs.get("botanu.outcome.status") if span_attrs else None
+                    existing_outcome = span_attrs.get("botanu.outcome.status") if isinstance(span_attrs, dict) else None
 
                     if existing_outcome is None and auto_outcome_on_success:
                         run_ctx.complete(RunStatus.SUCCESS)
@@ -229,14 +228,6 @@ def _emit_run_completed(
 
     span.set_attribute("botanu.outcome.status", status.value)
     span.set_attribute("botanu.run.duration_ms", duration_ms)
-
-    record_run_completed(
-        use_case=run_ctx.use_case,
-        status=status.value,
-        environment=run_ctx.environment,
-        duration_ms=duration_ms,
-        workflow=run_ctx.workflow,
-    )
 
 
 # Alias

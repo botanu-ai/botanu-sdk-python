@@ -22,6 +22,7 @@ import os
 import time
 from dataclasses import dataclass, field
 from enum import Enum
+from functools import lru_cache
 from typing import Any, Dict, Optional
 
 from opentelemetry import trace
@@ -384,12 +385,17 @@ class AttemptLedger:
 _global_ledger: Optional[AttemptLedger] = None
 
 
+@lru_cache(maxsize=1)
+def _create_default_ledger() -> AttemptLedger:
+    """Create default ledger instance (thread-safe via lru_cache)."""
+    return AttemptLedger()
+
+
 def get_ledger() -> AttemptLedger:
-    """Get the global attempt ledger instance."""
-    global _global_ledger
-    if _global_ledger is None:
-        _global_ledger = AttemptLedger()
-    return _global_ledger
+    """Get the global attempt ledger instance (thread-safe)."""
+    if _global_ledger is not None:
+        return _global_ledger
+    return _create_default_ledger()
 
 
 def set_ledger(ledger: AttemptLedger) -> None:
