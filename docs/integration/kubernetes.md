@@ -6,6 +6,29 @@ Zero-code instrumentation for large-scale deployments.
 
 For organizations with thousands of applications, modifying code in every repo is impractical. This guide covers zero-code instrumentation using Kubernetes-native approaches.
 
+## What Requires Code Changes
+
+| Service Type | Code Change | Config Change |
+|--------------|-------------|---------------|
+| **Entry point** | `@botanu_use_case` decorator (generates `run_id`) | K8s annotation |
+| **Intermediate services** | None | K8s annotation only |
+
+**Entry point** = The service where the business transaction starts (API gateway, webhook handler, queue consumer).
+
+**Intermediate services** = All downstream services called by the entry point.
+
+## What Gets Auto-Instrumented
+
+With zero-code instrumentation, the following are automatically traced:
+
+- **HTTP clients** — requests, httpx, urllib3, aiohttp (including retries)
+- **Frameworks** — FastAPI, Flask, Django, Starlette
+- **Databases** — PostgreSQL, MySQL, MongoDB, Redis, SQLAlchemy
+- **Messaging** — Celery, Kafka
+- **LLM Providers** — OpenAI, Anthropic, Vertex AI
+
+**Retries are automatically captured.** Each HTTP call (including retries from libraries like `tenacity`, `urllib3.util.retry`, or `httpx` retry) creates a separate span. The `run_id` propagates via W3C Baggage headers on every request.
+
 ## Architecture
 
 ```
@@ -221,9 +244,9 @@ spec:
           exporters: [otlp]
 ```
 
-## Entry Point Service
+## Entry Point Service (Code Change Required)
 
-Only the entry point service needs the Botanu decorator:
+The entry point service is the **only** service that needs a code change. It must use `@botanu_use_case` to generate the `run_id`:
 
 ```python
 # entry-service/app.py
@@ -233,13 +256,20 @@ enable(service_name="entry-service")
 
 @botanu_use_case(name="Customer Support")
 async def handle_request(request_id: str):
-    # Calls to downstream services propagate run_id automatically
-    result = await call_service_b(request_id)
+    # run_id is generated here and propagates to all downstream calls
+    # including retries, parallel calls, and nested service calls
+    result = await call_service_b(request_id)  # run_id propagates
+    result2 = await call_service_c(request_id)  # same run_id
     emit_outcome("success")
     return result
 ```
 
-Downstream services (B, C, D, etc.) need zero code changes.
+**Why is this required?** The `@botanu_use_case` decorator:
+1. Generates a unique `run_id` (UUIDv7)
+2. Sets the `run_id` in W3C Baggage
+3. All subsequent HTTP calls include this baggage in headers
+
+**Downstream services (B, C, D, etc.) need zero code changes** — they just need the K8s annotation.
 
 ## Helm Chart
 

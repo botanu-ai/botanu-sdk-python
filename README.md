@@ -57,13 +57,21 @@ No manual instrumentation required.
 
 ## Kubernetes Deployment
 
-For large-scale deployments, use zero-code instrumentation via OTel Operator:
+For large-scale deployments (2000+ services):
+
+| Service Type | Code Change | Kubernetes Config |
+|--------------|-------------|-------------------|
+| Entry point | `@botanu_use_case` decorator | Annotation |
+| Intermediate | None | Annotation only |
 
 ```yaml
+# Intermediate services - annotation only, no code changes
 metadata:
   annotations:
     instrumentation.opentelemetry.io/inject-python: "true"
 ```
+
+Auto-instrumentation captures all HTTP calls including retries (requests, httpx, aiohttp, urllib3).
 
 See [Kubernetes Deployment Guide](./docs/integration/kubernetes.md) for details.
 
