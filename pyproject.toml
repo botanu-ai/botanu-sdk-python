@@ -1,0 +1,220 @@
+# SPDX-FileCopyrightText: 2026 The Botanu Authors
+# SPDX-License-Identifier: Apache-2.0
+
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+# ---------------------------------------------------------------------------
+# Project metadata  (PEP 621)
+# ---------------------------------------------------------------------------
+[project]
+name = "botanu"
+dynamic = ["version"]
+description = "OpenTelemetry-native run-level cost attribution for AI workflows"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.9"
+authors = [
+    { name = "The Botanu Authors", email = "oss@botanu.ai" },
+]
+keywords = [
+    "opentelemetry",
+    "tracing",
+    "observability",
+    "ai",
+    "llm",
+    "cost-attribution",
+    "mlops",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: System :: Monitoring",
+    "Typing :: Typed",
+]
+
+# Core dependency — opentelemetry-api only (~50 KB, zero transitive deps).
+# Everything else is behind optional extras so adopters never pay for what
+# they don't use.
+dependencies = [
+    "opentelemetry-api >= 1.20.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/botanu-ai/botanu-sdk-python"
+Documentation = "https://docs.botanu.ai"
+Repository = "https://github.com/botanu-ai/botanu-sdk-python"
+Changelog = "https://github.com/botanu-ai/botanu-sdk-python/blob/main/CHANGELOG.md"
+Issues = "https://github.com/botanu-ai/botanu-sdk-python/issues"
+
+# ---------------------------------------------------------------------------
+# Optional extras
+# ---------------------------------------------------------------------------
+[project.optional-dependencies]
+# Full OTel SDK + OTLP exporter — needed only when running standalone
+# (no pre-existing TracerProvider from Datadog / Splunk / etc.)
+sdk = [
+    "opentelemetry-sdk >= 1.20.0",
+    "opentelemetry-exporter-otlp-proto-http >= 1.20.0",
+]
+
+# Auto-instrumentation libraries for common frameworks
+instruments = [
+    "opentelemetry-instrumentation >= 0.41b0",
+    "opentelemetry-instrumentation-fastapi >= 0.41b0",
+    "opentelemetry-instrumentation-requests >= 0.41b0",
+    "opentelemetry-instrumentation-httpx >= 0.41b0",
+    "opentelemetry-instrumentation-flask >= 0.41b0",
+    "opentelemetry-instrumentation-django >= 0.41b0",
+    "opentelemetry-instrumentation-urllib3 >= 0.41b0",
+    "opentelemetry-instrumentation-starlette >= 0.41b0",
+    "opentelemetry-instrumentation-sqlalchemy >= 0.41b0",
+    "opentelemetry-instrumentation-redis >= 0.41b0",
+    "opentelemetry-instrumentation-celery >= 0.41b0",
+    "opentelemetry-instrumentation-grpc >= 0.41b0",
+    "opentelemetry-instrumentation-logging >= 0.41b0",
+]
+
+# GenAI / AI model auto-instrumentation
+genai = [
+    "opentelemetry-instrumentation-openai-v2 >= 2.0b0",
+    "opentelemetry-instrumentation-anthropic >= 0.1b0",
+    "opentelemetry-instrumentation-vertexai >= 0.1b0",
+    "opentelemetry-instrumentation-google-genai >= 0.1b0",
+    "opentelemetry-instrumentation-langchain >= 0.1b0",
+]
+
+# Cross-service carrier propagation (SQS, Kafka, Celery, Redis)
+carriers = [
+    "celery >= 5.0.0",
+    "aiokafka >= 0.8.0",
+]
+
+# Everything
+all = [
+    "botanu[sdk,instruments,genai,carriers]",
+]
+
+# Development / CI
+dev = [
+    "botanu[all]",
+    "pytest >= 7.4.0",
+    "pytest-asyncio >= 0.21.0",
+    "pytest-cov >= 4.1.0",
+    "coverage[toml] >= 7.0",
+    "httpx >= 0.24.0",
+    "ruff >= 0.4.0",
+    "mypy >= 1.7.0",
+    "pre-commit >= 3.5.0",
+]
+
+# ---------------------------------------------------------------------------
+# Hatch — build targets & versioning
+# ---------------------------------------------------------------------------
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.version.raw-options]
+version_scheme = "guess-next-dev"
+local_scheme = "no-local-version"
+
+[tool.hatch.build.targets.sdist]
+include = ["src/botanu/**", "LICENSE", "NOTICE", "README.md"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/botanu"]
+
+# ---------------------------------------------------------------------------
+# Ruff  (linter + formatter)
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 120
+target-version = "py39"
+src = ["src"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+    "S",   # flake8-bandit (security)
+    "RUF", # ruff-specific
+]
+ignore = [
+    "E501",   # line too long — handled by formatter
+    "S101",   # assert in tests is fine
+    "S110",   # try-except-pass is intentional in resource detection
+    "UP006",  # dict vs Dict — keep Dict[] for 3.9 compat
+    "UP007",  # X | Y syntax — keep Optional[] for 3.9 compat
+    "UP035",  # typing.Dict deprecated — keep for 3.9 compat
+    "UP045",  # X | None vs Optional — keep Optional[] for 3.9 compat
+    "RUF002", # ambiguous dash — intentional in docstrings
+    "RUF022", # __all__ not sorted — grouped logically
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S106"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
+
+# ---------------------------------------------------------------------------
+# mypy
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = false
+warn_unused_configs = true
+ignore_missing_imports = true
+strict = false
+# OTel SDK types are not always precise; runtime behavior is correct
+disable_error_code = ["arg-type", "attr-defined", "operator", "misc"]
+
+# ---------------------------------------------------------------------------
+# pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = [
+    "--strict-markers",
+    "--tb=short",
+]
+markers = [
+    "integration: marks tests that require external services",
+]
+
+# ---------------------------------------------------------------------------
+# coverage
+# ---------------------------------------------------------------------------
+[tool.coverage.run]
+source = ["botanu"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 70
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.",
+]
+# Exclude integration-heavy modules that require full OTel SDK setup
+omit = [
+    "src/botanu/sdk/bootstrap.py",
+    "src/botanu/sdk/middleware.py",
+]
