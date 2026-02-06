@@ -1,9 +1,8 @@
 # Botanu SDK for Python
 
 [![CI](https://github.com/botanu-ai/botanu-sdk-python/actions/workflows/ci.yml/badge.svg)](https://github.com/botanu-ai/botanu-sdk-python/actions/workflows/ci.yml)
-[![PyPI version](https://badge.fury.io/py/botanu.svg)](https://pypi.org/project/botanu/)
-[![Python versions](https://img.shields.io/pypi/pyversions/botanu.svg)](https://pypi.org/project/botanu/)
-[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/botanu-ai/botanu-sdk-python/badge)](https://scorecard.dev/viewer/?uri=github.com/botanu-ai/botanu-sdk-python)
+[![PyPI version](https://img.shields.io/pypi/v/botanu)](https://pypi.org/project/botanu/)
+[![Python](https://img.shields.io/badge/python-3.9%20|%203.10%20|%203.11%20|%203.12%20|%203.13-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
 OpenTelemetry-native **run-level cost attribution** for AI workflows.

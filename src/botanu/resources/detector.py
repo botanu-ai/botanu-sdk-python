@@ -182,15 +182,30 @@ def _is_azure() -> bool:
 
 
 def _get_aws_availability_zone() -> Optional[str]:
+    """Get AWS availability zone from EC2 instance metadata.
+
+    Uses IMDS (Instance Metadata Service) which is only accessible from within EC2.
+    Configure via environment variables:
+    - AWS_EC2_METADATA_SERVICE_ENDPOINT: Override the metadata endpoint
+    - AWS_EC2_METADATA_DISABLED: Set to 'true' to disable metadata calls
+    """
     if os.environ.get("AWS_LAMBDA_FUNCTION_NAME"):
         return None
+
+    # Respect AWS SDK standard env vars for disabling/configuring metadata
+    if os.environ.get("AWS_EC2_METADATA_DISABLED", "").lower() == "true":
+        return None
+
+    # Use AWS SDK standard endpoint override, or default to standard IMDS address
+    endpoint = os.environ.get("AWS_EC2_METADATA_SERVICE_ENDPOINT", "http://169.254.169.254")
+    if not endpoint or not endpoint.startswith(("http://", "https://")):
+        return None
+
     try:
         import urllib.request
 
-        req = urllib.request.Request(
-            "http://169.254.169.254/latest/meta-data/placement/availability-zone",
-            headers={"Accept": "text/plain"},
-        )
+        url = f"{endpoint}/latest/meta-data/placement/availability-zone"
+        req = urllib.request.Request(url, headers={"Accept": "text/plain"})  # noqa: S310
         with urllib.request.urlopen(req, timeout=0.5) as resp:  # noqa: S310
             return resp.read().decode("utf-8").strip()
     except Exception:
