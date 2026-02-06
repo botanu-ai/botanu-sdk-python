@@ -14,21 +14,16 @@ Botanu adds **runs** on top of distributed tracing. A run represents a single bu
 ## Quick Start
 
 ```python
-from botanu import enable, botanu_use_case, emit_outcome
+from botanu import enable, botanu_use_case
 
 enable(service_name="my-app")
 
-@botanu_use_case(name="Customer Support")
-async def handle_ticket(ticket_id: str):
-    # All LLM calls, DB queries, and HTTP requests inside
-    # are automatically instrumented and linked to this run
-    context = await fetch_context(ticket_id)
-    response = await generate_response(context)
-    emit_outcome("success", value_type="tickets_resolved", value_amount=1)
-    return response
+@botanu_use_case(name="process_order")
+def process_order(order_id: str):
+    order = db.get_order(order_id)
+    result = llm.analyze(order)
+    return result
 ```
-
-That's it. All operations within the use case are automatically tracked.
 
 ## Installation
 

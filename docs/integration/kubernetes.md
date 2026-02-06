@@ -249,25 +249,19 @@ spec:
 The entry point service is the **only** service that needs a code change. It must use `@botanu_use_case` to generate the `run_id`:
 
 ```python
-# entry-service/app.py
-from botanu import enable, botanu_use_case, emit_outcome
+from botanu import enable, botanu_use_case
 
 enable(service_name="entry-service")
 
-@botanu_use_case(name="Customer Support")
-async def handle_request(request_id: str):
-    # run_id is generated here and propagates to all downstream calls
-    # including retries, parallel calls, and nested service calls
-    result = await call_service_b(request_id)  # run_id propagates
-    result2 = await call_service_c(request_id)  # same run_id
-    emit_outcome("success")
+@botanu_use_case(name="process_order")
+def process_order(order_id: str):
+    order = db.get_order(order_id)
+    result = llm.analyze(order)
+    notify_service.send(result)
     return result
 ```
 
-**Why is this required?** The `@botanu_use_case` decorator:
-1. Generates a unique `run_id` (UUIDv7)
-2. Sets the `run_id` in W3C Baggage
-3. All subsequent HTTP calls include this baggage in headers
+The `@botanu_use_case` decorator generates a `run_id` and propagates it via W3C Baggage to all downstream calls.
 
 **Downstream services (B, C, D, etc.) need zero code changes** — they just need the K8s annotation.
 

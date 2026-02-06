@@ -49,20 +49,15 @@ Botanu introduces **run-level attribution**: a unique `run_id` that follows your
 ## Quick Example
 
 ```python
-from botanu import enable, botanu_use_case, emit_outcome
+from botanu import enable, botanu_use_case
 
-enable(service_name="support-agent")
+enable(service_name="my-app")
 
-@botanu_use_case("Customer Support")
-async def handle_ticket(ticket_id: str):
-    # All LLM calls, DB queries, and HTTP requests are auto-instrumented
-    context = await fetch_context(ticket_id)
-    response = await openai.chat.completions.create(
-        model="gpt-4",
-        messages=[{"role": "user", "content": context}]
-    )
-    emit_outcome("success", value_type="tickets_resolved", value_amount=1)
-    return response
+@botanu_use_case(name="process_order")
+def process_order(order_id: str):
+    order = db.get_order(order_id)
+    result = llm.analyze(order)
+    return result
 ```
 
 ## License
