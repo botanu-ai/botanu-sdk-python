@@ -31,6 +31,7 @@ Botanu introduces **run-level attribution**: a unique `run_id` that follows your
 ### Integration
 
 - [Auto-Instrumentation](integration/auto-instrumentation.md) - Automatic instrumentation for common libraries
+- [Kubernetes Deployment](integration/kubernetes.md) - Zero-code instrumentation at scale
 - [Existing OTel Setup](integration/existing-otel.md) - Integrate with existing OpenTelemetry deployments
 - [Collector Configuration](integration/collector.md) - Configure the OpenTelemetry Collector
 
@@ -48,21 +49,19 @@ Botanu introduces **run-level attribution**: a unique `run_id` that follows your
 ## Quick Example
 
 ```python
-from botanu import init_botanu, botanu_use_case
-from botanu.tracking.llm import track_llm_call
+from botanu import enable, botanu_use_case, emit_outcome
 
-# Initialize once at startup
-init_botanu(service_name="support-agent")
+enable(service_name="support-agent")
 
 @botanu_use_case("Customer Support")
-def handle_ticket(ticket_id: str):
-    # Every operation inside gets the same run_id
-    with track_llm_call(provider="openai", model="gpt-4") as tracker:
-        response = openai.chat.completions.create(...)
-        tracker.set_tokens(
-            input_tokens=response.usage.prompt_tokens,
-            output_tokens=response.usage.completion_tokens,
-        )
+async def handle_ticket(ticket_id: str):
+    # All LLM calls, DB queries, and HTTP requests are auto-instrumented
+    context = await fetch_context(ticket_id)
+    response = await openai.chat.completions.create(
+        model="gpt-4",
+        messages=[{"role": "user", "content": context}]
+    )
+    emit_outcome("success", value_type="tickets_resolved", value_amount=1)
     return response
 ```
 
