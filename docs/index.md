@@ -51,12 +51,12 @@ Botanu introduces **run-level attribution**: a unique `run_id` that follows your
 ```python
 from botanu import enable, botanu_use_case
 
-enable(service_name="my-app")
+enable(service_name="my-service")
 
-@botanu_use_case(name="process_order")
-def process_order(order_id: str):
-    order = db.get_order(order_id)
-    result = llm.analyze(order)
+@botanu_use_case(name="my_workflow")
+def my_function():
+    data = db.query(...)
+    result = llm.complete(...)
     return result
 ```
 

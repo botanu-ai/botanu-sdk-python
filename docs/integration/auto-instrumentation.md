@@ -15,12 +15,12 @@ from botanu import enable, botanu_use_case
 
 enable(service_name="my-service")
 
-@botanu_use_case(name="process_order")
-def process_order(order_id: str):
-    order = db.get_order(order_id)
+@botanu_use_case(name="my_workflow")
+def my_function():
+    data = db.query(...)
     result = openai.chat.completions.create(
         model="gpt-4",
-        messages=[{"role": "user", "content": order.description}]
+        messages=[{"role": "user", "content": data}]
     )
     return result
 ```

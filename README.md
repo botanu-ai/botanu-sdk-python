@@ -16,12 +16,12 @@ Botanu adds **runs** on top of distributed tracing. A run represents a single bu
 ```python
 from botanu import enable, botanu_use_case
 
-enable(service_name="my-app")
+enable(service_name="my-service")
 
-@botanu_use_case(name="process_order")
-def process_order(order_id: str):
-    order = db.get_order(order_id)
-    result = llm.analyze(order)
+@botanu_use_case(name="my_workflow")
+def my_function():
+    data = db.query(...)
+    result = llm.complete(...)
     return result
 ```
 

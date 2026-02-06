@@ -253,11 +253,11 @@ from botanu import enable, botanu_use_case
 
 enable(service_name="entry-service")
 
-@botanu_use_case(name="process_order")
-def process_order(order_id: str):
-    order = db.get_order(order_id)
-    result = llm.analyze(order)
-    notify_service.send(result)
+@botanu_use_case(name="my_workflow")
+def my_function():
+    data = db.query(...)
+    result = llm.complete(...)
+    downstream_service.call(result)
     return result
 ```
 

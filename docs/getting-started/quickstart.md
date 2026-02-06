@@ -26,10 +26,10 @@ enable(service_name="my-service")
 ```python
 from botanu import botanu_use_case
 
-@botanu_use_case(name="process_order")
-def process_order(order_id: str):
-    order = db.get_order(order_id)
-    result = llm.analyze(order)
+@botanu_use_case(name="my_workflow")
+def my_function():
+    data = db.query(...)
+    result = llm.complete(...)
     return result
 ```
 
@@ -40,16 +40,15 @@ All LLM calls, database queries, and HTTP requests inside the function are autom
 ```python
 from botanu import enable, botanu_use_case
 
-enable(service_name="order-service")
+enable(service_name="my-service")
 
-@botanu_use_case(name="process_order")
-def process_order(order_id: str):
-    order = db.get_order(order_id)
+@botanu_use_case(name="my_workflow")
+def my_function():
+    data = db.query(...)
     result = openai.chat.completions.create(
         model="gpt-4",
-        messages=[{"role": "user", "content": order.description}]
+        messages=[{"role": "user", "content": data}]
     )
-    db.save_result(order_id, result)
     return result
 ```
 
@@ -58,7 +57,7 @@ def process_order(order_id: str):
 | Attribute | Example | Description |
 |-----------|---------|-------------|
 | `botanu.run_id` | `019abc12-...` | Unique run identifier |
-| `botanu.use_case` | `process_order` | Business use case |
+| `botanu.use_case` | `my_workflow` | Business use case |
 | `gen_ai.usage.input_tokens` | `150` | LLM input tokens |
 | `gen_ai.usage.output_tokens` | `200` | LLM output tokens |
 | `db.system` | `postgresql` | Database system |

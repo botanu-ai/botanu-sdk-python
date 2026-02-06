@@ -29,10 +29,10 @@ from botanu import botanu_use_case
 ```python
 from botanu import botanu_use_case
 
-@botanu_use_case(name="process_order")
-def process_order(order_id: str):
-    order = db.get_order(order_id)
-    result = llm.analyze(order)
+@botanu_use_case(name="my_workflow")
+def my_function():
+    data = db.query(...)
+    result = llm.complete(...)
     return result
 ```
 
@@ -53,9 +53,9 @@ def process_order(order_id: str):
 ```python
 from botanu import use_case
 
-@use_case(name="process_order")
-def process_order(order_id: str):
-    return db.get_order(order_id)
+@use_case(name="my_workflow")
+def my_function():
+    return db.query(...)
 ```
 
 ## @botanu_outcome
@@ -79,19 +79,18 @@ def extract_data():
 ```python
 from botanu import botanu_use_case, botanu_outcome
 
-@botanu_use_case(name="data_pipeline")
-def run_pipeline():
-    extract_data()
-    transform_data()
-    load_data()
+@botanu_use_case(name="my_workflow")
+def my_function():
+    step_one()
+    step_two()
 
 @botanu_outcome()
-def extract_data():
-    return fetch_from_source()
+def step_one():
+    return do_work()
 
 @botanu_outcome()
-def transform_data():
-    return apply_transformations()
+def step_two():
+    return do_more_work()
 ```
 
 ## See Also
