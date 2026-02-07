@@ -91,7 +91,7 @@ jobs:
           path: dist/
 
   # -------------------------------------------------------------------
-  # DCO sign-off check (required by Linux Foundation)
+  # DCO sign-off check
   # -------------------------------------------------------------------
   dco:
     runs-on: ubuntu-latest
