@@ -66,11 +66,11 @@ class TestBotanuConfigDefaults:
             assert config.deployment_environment == "staging"
 
     def test_env_var_otlp_endpoint_base(self):
-        """OTEL_EXPORTER_OTLP_ENDPOINT gets /v1/traces appended."""
+        """OTEL_EXPORTER_OTLP_ENDPOINT is stored as base; bootstrap appends /v1/traces."""
         with mock.patch.dict(os.environ, {"OTEL_EXPORTER_OTLP_ENDPOINT": "http://collector:4318"}):
             config = BotanuConfig()
-            # Base endpoint gets /v1/traces appended
-            assert config.otlp_endpoint == "http://collector:4318/v1/traces"
+            # Base endpoint stored as-is; bootstrap.py appends /v1/traces
+            assert config.otlp_endpoint == "http://collector:4318"
 
     def test_env_var_otlp_traces_endpoint_direct(self):
         """OTEL_EXPORTER_OTLP_TRACES_ENDPOINT is used directly without appending."""
@@ -187,6 +187,163 @@ class TestBotanuConfigToDict:
         assert d["service"]["name"] == "test-service"
         assert d["service"]["environment"] == "staging"
         assert d["otlp"]["endpoint"] == "http://localhost:4318"
+
+
+class TestBotanuConfigExportTuning:
+    """Tests for export tuning env vars (queue, batch, timeout)."""
+
+    def test_default_export_values(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            for key in ["BOTANU_MAX_QUEUE_SIZE", "BOTANU_MAX_EXPORT_BATCH_SIZE", "BOTANU_EXPORT_TIMEOUT_MILLIS"]:
+                os.environ.pop(key, None)
+            config = BotanuConfig()
+            assert config.max_queue_size == 65536
+            assert config.max_export_batch_size == 512
+            assert config.export_timeout_millis == 30000
+
+    def test_env_var_max_queue_size(self):
+        with mock.patch.dict(os.environ, {"BOTANU_MAX_QUEUE_SIZE": "131072"}):
+            config = BotanuConfig()
+            assert config.max_queue_size == 131072
+
+    def test_env_var_max_export_batch_size(self):
+        with mock.patch.dict(os.environ, {"BOTANU_MAX_EXPORT_BATCH_SIZE": "1024"}):
+            config = BotanuConfig()
+            assert config.max_export_batch_size == 1024
+
+    def test_env_var_export_timeout_millis(self):
+        with mock.patch.dict(os.environ, {"BOTANU_EXPORT_TIMEOUT_MILLIS": "60000"}):
+            config = BotanuConfig()
+            assert config.export_timeout_millis == 60000
+
+    def test_invalid_queue_size_ignored(self):
+        with mock.patch.dict(os.environ, {"BOTANU_MAX_QUEUE_SIZE": "not_a_number"}):
+            config = BotanuConfig()
+            assert config.max_queue_size == 65536
+
+    def test_invalid_batch_size_ignored(self):
+        with mock.patch.dict(os.environ, {"BOTANU_MAX_EXPORT_BATCH_SIZE": "bad"}):
+            config = BotanuConfig()
+            assert config.max_export_batch_size == 512
+
+    def test_invalid_timeout_ignored(self):
+        with mock.patch.dict(os.environ, {"BOTANU_EXPORT_TIMEOUT_MILLIS": "abc"}):
+            config = BotanuConfig()
+            assert config.export_timeout_millis == 30000
+
+
+class TestBotanuConfigFromYamlExport:
+    """Tests for YAML export configuration parsing."""
+
+    def test_from_yaml_with_export_config(self, tmp_path):
+        yaml_content = """
+service:
+  name: yaml-export-test
+export:
+  batch_size: 256
+  queue_size: 32768
+  delay_ms: 2000
+  export_timeout_ms: 15000
+"""
+        yaml_file = tmp_path / "config.yaml"
+        yaml_file.write_text(yaml_content)
+
+        config = BotanuConfig.from_yaml(str(yaml_file))
+        assert config.max_export_batch_size == 256
+        assert config.max_queue_size == 32768
+        assert config.schedule_delay_millis == 2000
+        assert config.export_timeout_millis == 15000
+
+    def test_from_yaml_export_defaults(self, tmp_path):
+        """YAML without export section uses defaults."""
+        yaml_content = """
+service:
+  name: minimal
+"""
+        yaml_file = tmp_path / "config.yaml"
+        yaml_file.write_text(yaml_content)
+
+        config = BotanuConfig.from_yaml(str(yaml_file))
+        assert config.max_export_batch_size == 512
+        assert config.max_queue_size == 65536
+        assert config.export_timeout_millis == 30000
+
+
+class TestBotanuConfigToDictExport:
+    """Tests for to_dict roundtrip with export params."""
+
+    def test_to_dict_includes_export_timeout(self):
+        config = BotanuConfig(export_timeout_millis=45000)
+        d = config.to_dict()
+        assert d["export"]["export_timeout_ms"] == 45000
+
+    def test_to_dict_roundtrip(self, tmp_path):
+        """to_dict output should be loadable by _from_dict."""
+        original = BotanuConfig(
+            service_name="roundtrip",
+            max_queue_size=4096,
+            max_export_batch_size=128,
+            export_timeout_millis=10000,
+        )
+        d = original.to_dict()
+        d["auto_instrument_packages"] = original.auto_instrument_packages
+        restored = BotanuConfig._from_dict(d)
+        assert restored.max_queue_size == 4096
+        assert restored.max_export_batch_size == 128
+        assert restored.export_timeout_millis == 10000
+
+
+class TestBotanuConfigPrecedence:
+    """Tests for BOTANU_* > OTEL_* > default precedence."""
+
+    def test_botanu_service_name_over_otel(self):
+        with mock.patch.dict(
+            os.environ,
+            {
+                "BOTANU_SERVICE_NAME": "botanu-svc",
+                "OTEL_SERVICE_NAME": "otel-svc",
+            },
+        ):
+            config = BotanuConfig()
+            assert config.service_name == "botanu-svc"
+
+    def test_botanu_endpoint_over_otel(self):
+        with mock.patch.dict(
+            os.environ,
+            {
+                "BOTANU_COLLECTOR_ENDPOINT": "http://botanu:4318",
+                "OTEL_EXPORTER_OTLP_ENDPOINT": "http://otel:4318",
+            },
+        ):
+            config = BotanuConfig()
+            assert config.otlp_endpoint == "http://botanu:4318"
+
+    def test_botanu_environment_over_otel(self):
+        with mock.patch.dict(
+            os.environ,
+            {
+                "BOTANU_ENVIRONMENT": "staging",
+                "OTEL_DEPLOYMENT_ENVIRONMENT": "production",
+            },
+        ):
+            config = BotanuConfig()
+            assert config.deployment_environment == "staging"
+
+    def test_propagation_mode_rejects_invalid(self):
+        with mock.patch.dict(os.environ, {"BOTANU_PROPAGATION_MODE": "invalid"}):
+            config = BotanuConfig()
+            assert config.propagation_mode == "lean"
+
+    def test_auto_detect_resources_env_false(self):
+        with mock.patch.dict(os.environ, {"BOTANU_AUTO_DETECT_RESOURCES": "false"}):
+            config = BotanuConfig()
+            assert config.auto_detect_resources is False
+
+    def test_auto_detect_resources_truthy_values(self):
+        for truthy in ("true", "1", "yes"):
+            with mock.patch.dict(os.environ, {"BOTANU_AUTO_DETECT_RESOURCES": truthy}):
+                config = BotanuConfig()
+                assert config.auto_detect_resources is True
 
 
 class TestBotanuConfigAutoInstrument:

@@ -53,7 +53,6 @@ def emit_outcome(
     if reason:
         span.set_attribute("botanu.outcome.reason", reason)
 
-    # Add span event for timeline visibility
     event_attrs: dict[str, object] = {"status": status}
     if value_type:
         event_attrs["value_type"] = value_type

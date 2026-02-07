@@ -7,7 +7,7 @@ Quick Start::
 
     from botanu import enable, botanu_use_case, emit_outcome
 
-    enable(service_name="my-app")
+    enable()  # reads config from OTEL_SERVICE_NAME, OTEL_EXPORTER_OTLP_ENDPOINT env vars
 
     @botanu_use_case(name="Customer Support")
     async def handle_request(data):

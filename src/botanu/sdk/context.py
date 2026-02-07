@@ -20,6 +20,16 @@ def set_baggage(key: str, value: str) -> object:
     Baggage is automatically propagated across service boundaries via
     W3C Baggage header.
 
+    .. warning::
+
+        Each call pushes a new context onto the stack.  The returned token
+        **must** be passed to ``opentelemetry.context.detach()`` when the
+        scope ends, otherwise the context stack grows unboundedly (memory
+        leak in long-running processes).
+
+        For setting multiple keys, prefer building the context manually
+        and attaching once — see ``decorators.py`` for the pattern.
+
     Args:
         key: Baggage key (e.g., ``"botanu.run_id"``).
         value: Baggage value.

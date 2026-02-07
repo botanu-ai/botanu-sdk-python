@@ -1,131 +1,70 @@
 # Installation
 
-This guide covers installing Botanu SDK and its optional dependencies.
-
 ## Requirements
 
 - Python 3.9 or later
-- OpenTelemetry Collector (for span processing)
+- OpenTelemetry Collector (recommended for production)
 
-## Basic Installation
-
-Install the core SDK with pip:
+## Install
 
 ```bash
 pip install botanu
 ```
 
-The core package has minimal dependencies:
-- `opentelemetry-api >= 1.20.0`
+One install gives you everything:
 
-This is all you need if you already have OpenTelemetry configured in your application.
+- **OTel SDK** + OTLP HTTP exporter
+- **Auto-instrumentation** for 50+ libraries (HTTP, databases, messaging, GenAI, AWS, gRPC)
 
-## Installation with Extras
+Instrumentation packages are lightweight shims that silently no-op when the target library is not installed. Zero bloat.
 
-### Full SDK (Recommended for Standalone)
-
-If you don't have an existing OpenTelemetry setup:
-
-```bash
-pip install "botanu[sdk]"
-```
-
-This adds:
-- `opentelemetry-sdk` - The OTel SDK implementation
-- `opentelemetry-exporter-otlp-proto-http` - OTLP HTTP exporter
-
-### Auto-Instrumentation
-
-For automatic instrumentation of common libraries:
-
-```bash
-pip install "botanu[instruments]"
-```
-
-Includes instrumentation for:
-- **HTTP clients**: requests, httpx, urllib3, aiohttp
-- **Web frameworks**: FastAPI, Flask, Django, Starlette
-- **Databases**: SQLAlchemy, psycopg2, asyncpg, pymongo, redis
-- **Messaging**: Celery, Kafka
-- **Other**: gRPC, logging
-
-### GenAI Instrumentation
-
-For automatic LLM provider instrumentation:
-
-```bash
-pip install "botanu[genai]"
-```
-
-Includes instrumentation for:
-- OpenAI
-- Anthropic
-- Google Vertex AI
-- Google GenAI
-- LangChain
-
-### Everything
-
-To install all optional dependencies:
-
-```bash
-pip install "botanu[all]"
-```
-
-### Development
-
-For development and testing:
-
-```bash
-pip install "botanu[dev]"
-```
-
-## Verify Installation
+## Verify
 
 ```python
 import botanu
 print(botanu.__version__)
 ```
 
-## Docker
+## Package Managers
 
-In a Dockerfile:
+### pip / requirements.txt
 
-```dockerfile
-FROM python:3.11-slim
-
-WORKDIR /app
-
-# Install Botanu with SDK extras
-RUN pip install "botanu[sdk]"
-
-COPY . .
-
-CMD ["python", "app.py"]
+```text
+botanu>=0.1.0
 ```
 
-## Poetry
+### Poetry
 
 ```toml
 [tool.poetry.dependencies]
-botanu = { version = "^0.1.0", extras = ["sdk"] }
+botanu = "^0.1.0"
 ```
 
-## pip-tools / requirements.txt
+### Docker
 
-```text
-# requirements.in
-botanu[sdk]>=0.1.0
+```dockerfile
+FROM python:3.12-slim
+WORKDIR /app
+RUN pip install botanu
+COPY . .
+CMD ["python", "app.py"]
 ```
 
-Generate with:
+## Development
+
+For running tests and linting:
+
 ```bash
-pip-compile requirements.in
+pip install "botanu[dev]"
 ```
 
 ## Collector Setup
 
-Botanu SDK sends traces to an OpenTelemetry Collector. You'll need one running to receive spans.
+The SDK sends traces to an OpenTelemetry Collector via OTLP HTTP (port 4318). Configure the endpoint via environment variable:
+
+```bash
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
+```
 
 Quick start with Docker:
 
@@ -133,9 +72,9 @@ Quick start with Docker:
 docker run -p 4318:4318 otel/opentelemetry-collector:latest
 ```
 
-See [Collector Configuration](../integration/collector.md) for detailed setup.
+See [Collector Configuration](../integration/collector.md) for production setup.
 
 ## Next Steps
 
 - [Quickstart](quickstart.md) - Your first instrumented application
-- [Configuration](configuration.md) - Customize SDK behavior
+- [Configuration](configuration.md) - Environment variables and YAML config

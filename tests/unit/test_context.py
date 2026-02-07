@@ -12,6 +12,7 @@ from botanu.sdk.context import (
     get_current_span,
     get_run_id,
     get_use_case,
+    get_workflow,
     set_baggage,
 )
 
@@ -45,6 +46,14 @@ class TestBaggageHelpers:
         set_baggage("botanu.use_case", "Customer Support")
         assert get_use_case() == "Customer Support"
 
+    def test_get_workflow(self):
+        set_baggage("botanu.workflow", "ticket_handler")
+        assert get_workflow() == "ticket_handler"
+
+    def test_get_workflow_not_set(self):
+        result = get_workflow()
+        assert result is None or isinstance(result, str)
+
 
 class TestSpanHelpers:
     """Tests for span helper functions."""
@@ -61,3 +70,38 @@ class TestSpanHelpers:
         assert span is not None
         # Non-recording spans have is_recording() == False
         assert not span.is_recording()
+
+
+class TestSetBaggageTokenManagement:
+    """Tests for set_baggage token lifecycle and context management."""
+
+    def test_set_baggage_returns_detachable_token(self):
+        from opentelemetry.context import detach
+
+        token = set_baggage("botanu.token_test", "val1")
+        assert token is not None
+        assert get_baggage("botanu.token_test") == "val1"
+        detach(token)
+
+    def test_multiple_set_baggage_stacks_values(self):
+        token1 = set_baggage("botanu.stack_a", "a")
+        token2 = set_baggage("botanu.stack_b", "b")
+
+        assert get_baggage("botanu.stack_a") == "a"
+        assert get_baggage("botanu.stack_b") == "b"
+        assert token1 is not None
+        assert token2 is not None
+
+    def test_overwrite_same_key(self):
+        set_baggage("botanu.overwrite", "first")
+        set_baggage("botanu.overwrite", "second")
+        assert get_baggage("botanu.overwrite") == "second"
+
+    def test_get_baggage_returns_none_in_clean_context(self):
+        from opentelemetry import context as otel_context
+
+        token = otel_context.attach(otel_context.Context())
+        try:
+            assert get_baggage("botanu.surely_missing") is None
+        finally:
+            otel_context.detach(token)

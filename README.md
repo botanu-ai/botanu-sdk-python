@@ -4,78 +4,138 @@
 [![PyPI version](https://img.shields.io/pypi/v/botanu)](https://pypi.org/project/botanu/)
 [![Python](https://img.shields.io/badge/python-3.9%20|%203.10%20|%203.11%20|%203.12%20|%203.13-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![LF AI & Data](https://img.shields.io/badge/LF%20AI%20%26%20Data-member-blue)](https://lfaidata.foundation/)
 
-OpenTelemetry-native run-level cost attribution for AI workflows.
+**Run-level cost attribution for AI workflows, built on OpenTelemetry.**
 
-## Overview
+Botanu adds **runs** on top of distributed tracing. A run represents one business transaction that may span multiple LLM calls, database queries, and microservices. By correlating every operation to a stable `run_id`, you get per-transaction cost attribution without sampling artifacts.
 
-Botanu adds **runs** on top of distributed tracing. A run represents a single business transaction that may span multiple LLM calls, database queries, and services. By correlating all operations to a stable `run_id`, you get accurate cost attribution without sampling artifacts.
+## How It Works
+
+```
+User Request
+    |
+    v
+  Entry Service          Intermediate Service         LLM / DB
+  @botanu_use_case  -->  enable() propagates   -->  auto-instrumented
+  creates run_id         run_id via W3C Baggage      spans tagged with run_id
+```
+
+1. **Entry point** creates a `run_id` with `@botanu_use_case`
+2. **Every service** calls `enable()` to propagate the `run_id` via W3C Baggage
+3. **All spans** across all services share the same `run_id`
+4. **Traces export** to your OTel Collector via OTLP (configured by environment variable)
 
 ## Quick Start
+
+### Install
+
+```bash
+pip install botanu
+```
+
+One install. Includes OTel SDK, OTLP exporter, and auto-instrumentation for 50+ libraries.
+
+### Instrument Your Code
+
+**Entry service** (where the workflow begins):
 
 ```python
 from botanu import enable, botanu_use_case
 
-enable(service_name="my-service")
+enable()  # reads config from env vars
 
-@botanu_use_case(name="my_workflow")
-def my_function():
-    data = db.query(...)
-    result = llm.complete(...)
+@botanu_use_case(name="Customer Support")
+async def handle_ticket(ticket_id: str):
+    data = await db.query(ticket_id)
+    result = await llm.complete(data)
     return result
 ```
 
-## Installation
+**Every other service** (intermediate, downstream):
 
-```bash
-pip install "botanu[all]"
+```python
+from botanu import enable
+
+enable()  # propagates run_id from incoming request
 ```
 
-| Extra | Description |
-|-------|-------------|
-| `sdk` | OpenTelemetry SDK + OTLP exporter |
-| `instruments` | Auto-instrumentation for HTTP, databases |
-| `genai` | Auto-instrumentation for LLM providers |
-| `all` | All of the above (recommended) |
+That's it. No collector endpoint in code. No manual span creation.
 
-## What Gets Auto-Instrumented
+### Configure via Environment Variables
 
-When you install `botanu[all]`, the following are automatically tracked:
+All configuration is via environment variables. **Zero hardcoded values in code.**
 
-- **LLM Providers** — OpenAI, Anthropic, Vertex AI, Bedrock, Azure OpenAI
-- **Databases** — PostgreSQL, MySQL, SQLite, MongoDB, Redis
-- **HTTP** — requests, httpx, urllib3, aiohttp
-- **Frameworks** — FastAPI, Flask, Django, Starlette
-- **Messaging** — Celery, Kafka
-
-No manual instrumentation required.
-
-## Kubernetes Deployment
-
-For large-scale deployments (2000+ services):
-
-| Service Type | Code Change | Kubernetes Config |
-|--------------|-------------|-------------------|
-| Entry point | `@botanu_use_case` decorator | Annotation |
-| Intermediate | None | Annotation only |
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | Collector endpoint | `http://localhost:4318` |
+| `OTEL_SERVICE_NAME` | Service name | `unknown_service` |
+| `BOTANU_ENVIRONMENT` | Deployment environment | `production` |
 
 ```yaml
-# Intermediate services - annotation only, no code changes
-metadata:
-  annotations:
-    instrumentation.opentelemetry.io/inject-python: "true"
+# docker-compose.yml / Kubernetes deployment
+environment:
+  - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
+  - OTEL_SERVICE_NAME=my-service
 ```
 
-Auto-instrumentation captures all HTTP calls including retries (requests, httpx, aiohttp, urllib3).
+See [Configuration Reference](./docs/getting-started/configuration.md) for all options.
+
+## Auto-Instrumentation
+
+Everything is included and auto-detected. If the library is in your dependencies, it gets instrumented:
+
+| Category | Libraries |
+|----------|-----------|
+| **LLM Providers** | OpenAI, Anthropic, Vertex AI, Google GenAI, LangChain, Ollama, CrewAI |
+| **Web Frameworks** | FastAPI, Flask, Django, Starlette, Falcon, Pyramid, Tornado |
+| **HTTP Clients** | requests, httpx, urllib3, aiohttp |
+| **Databases** | PostgreSQL (psycopg2/3, asyncpg), MySQL, SQLite, MongoDB, Redis, SQLAlchemy, Elasticsearch, Cassandra |
+| **Messaging** | Celery, Kafka, RabbitMQ (pika) |
+| **AWS** | botocore, boto3 (SQS) |
+| **gRPC** | Client + Server |
+| **Runtime** | logging, threading, asyncio |
+
+No manual instrumentation required. Libraries not installed are silently skipped.
+
+## Kubernetes at Scale
+
+For large deployments (2000+ services), only entry points need code changes:
+
+| Service Type | Code Change | Configuration |
+|--------------|-------------|---------------|
+| Entry point | `@botanu_use_case` decorator | `OTEL_EXPORTER_OTLP_ENDPOINT` env var |
+| Intermediate | `enable()` call only | `OTEL_EXPORTER_OTLP_ENDPOINT` env var |
 
 See [Kubernetes Deployment Guide](./docs/integration/kubernetes.md) for details.
 
+## Architecture
+
+```
+                    +---------+     +---------+     +---------+
+                    | Service | --> | Service | --> | Service |
+                    | enable()| --> | enable()| --> | enable()|
+                    +---------+     +---------+     +---------+
+                         |               |               |
+                         v               v               v
+                    +-------------------------------------+
+                    |       OTel Collector (OTLP)         |
+                    +-------------------------------------+
+                         |               |               |
+                         v               v               v
+                    Jaeger/Tempo   Prometheus   Your Backend
+```
+
+The SDK is a thin layer on OpenTelemetry:
+- **SDK**: Generates `run_id`, propagates context, auto-instruments
+- **Collector**: PII redaction, cardinality limits, routing, vendor enrichment
+
 ## Documentation
 
-- [Getting Started](./docs/getting-started/)
-- [Concepts](./docs/concepts/)
-- [Integration](./docs/integration/)
-- [API Reference](./docs/api/)
+- [Getting Started](./docs/getting-started/) - Installation, quickstart, configuration
+- [Concepts](./docs/concepts/) - Runs, context propagation, cost attribution
+- [Integration](./docs/integration/) - Auto-instrumentation, Kubernetes, collector setup
+- [API Reference](./docs/api/) - `enable()`, `@botanu_use_case`, `emit_outcome()`
 
 ## Requirements
 
@@ -84,7 +144,9 @@ See [Kubernetes Deployment Guide](./docs/integration/kubernetes.md) for details.
 
 ## Contributing
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md). This project uses DCO sign-off.
+We welcome contributions. See [CONTRIBUTING.md](./CONTRIBUTING.md).
+
+This project follows the [Developer Certificate of Origin (DCO)](https://developercertificate.org/). Sign off your commits:
 
 ```bash
 git commit -s -m "Your commit message"

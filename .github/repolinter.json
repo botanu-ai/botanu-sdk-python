@@ -1,0 +1,77 @@
+{
+  "$schema": "https://raw.githubusercontent.com/todogroup/repolinter/master/rulesets/schema.json",
+  "version": 2,
+  "axioms": {},
+  "rules": {
+    "license-file-exists": {
+      "level": "error",
+      "rule": {
+        "type": "file-existence",
+        "options": {
+          "globsAny": ["LICENSE*", "COPYING*"]
+        }
+      }
+    },
+    "readme-file-exists": {
+      "level": "error",
+      "rule": {
+        "type": "file-existence",
+        "options": {
+          "globsAny": ["README*"]
+        }
+      }
+    },
+    "contributing-file-exists": {
+      "level": "warning",
+      "rule": {
+        "type": "file-existence",
+        "options": {
+          "globsAny": ["CONTRIBUTING*"]
+        }
+      }
+    },
+    "changelog-file-exists": {
+      "level": "warning",
+      "rule": {
+        "type": "file-existence",
+        "options": {
+          "globsAny": ["CHANGELOG*"]
+        }
+      }
+    },
+    "code-of-conduct-file-exists": {
+      "level": "warning",
+      "rule": {
+        "type": "file-existence",
+        "options": {
+          "globsAny": ["CODE_OF_CONDUCT*", "CODE-OF-CONDUCT*", ".github/CODE_OF_CONDUCT*"]
+        }
+      }
+    },
+    "security-file-exists": {
+      "level": "warning",
+      "rule": {
+        "type": "file-existence",
+        "options": {
+          "globsAny": ["SECURITY*", ".github/SECURITY*"]
+        }
+      }
+    },
+    "notice-file-exists": {
+      "level": "warning",
+      "rule": {
+        "type": "file-existence",
+        "options": {
+          "globsAny": ["NOTICE*"]
+        }
+      }
+    },
+    "license-detectable-by-licensee": {
+      "level": "warning",
+      "rule": {
+        "type": "license-detectable-by-licensee",
+        "options": {}
+      }
+    }
+  }
+}

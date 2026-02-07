@@ -35,12 +35,10 @@ class BotanuConfig:
     The SDK is a thin wrapper on OpenTelemetry.  PII redaction, cardinality
     limits, and vendor enrichment are handled by the OTel Collector — not here.
 
-    Example::
+    Typically configured via environment variables (no hardcoded values)::
 
-        >>> config = BotanuConfig(
-        ...     service_name="my-service",
-        ...     otlp_endpoint="http://collector:4318/v1/traces",
-        ... )
+        >>> # Reads from OTEL_SERVICE_NAME, OTEL_EXPORTER_OTLP_ENDPOINT, etc.
+        >>> config = BotanuConfig()
 
         >>> # Or load from YAML
         >>> config = BotanuConfig.from_yaml("config/botanu.yaml")
@@ -60,9 +58,12 @@ class BotanuConfig:
     otlp_headers: Optional[Dict[str, str]] = None
 
     # Span export configuration
+    # Large queue prevents span loss under burst traffic.
+    # At ~1KB/span, 65536 spans ≈ 64MB memory ceiling.
     max_export_batch_size: int = 512
-    max_queue_size: int = 2048
+    max_queue_size: int = 65536
     schedule_delay_millis: int = 5000
+    export_timeout_millis: int = 30000
 
     # Propagation mode: "lean" (run_id + use_case only) or "full" (all context)
     propagation_mode: str = "lean"
@@ -106,9 +107,15 @@ class BotanuConfig:
     _config_file: Optional[str] = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
-        """Apply environment variable defaults."""
+        """Apply environment variable defaults.
+
+        Precedence: BOTANU_* > OTEL_* > defaults
+        """
         if self.service_name is None:
-            self.service_name = os.getenv("OTEL_SERVICE_NAME", "unknown_service")
+            self.service_name = os.getenv(
+                "BOTANU_SERVICE_NAME",
+                os.getenv("OTEL_SERVICE_NAME", "unknown_service"),
+            )
 
         if self.service_version is None:
             self.service_version = os.getenv("OTEL_SERVICE_VERSION")
@@ -122,21 +129,48 @@ class BotanuConfig:
 
         if self.deployment_environment is None:
             self.deployment_environment = os.getenv(
-                "OTEL_DEPLOYMENT_ENVIRONMENT",
-                os.getenv("BOTANU_ENVIRONMENT", "production"),
+                "BOTANU_ENVIRONMENT",
+                os.getenv("OTEL_DEPLOYMENT_ENVIRONMENT", "production"),
             )
 
         if self.otlp_endpoint is None:
-            env_endpoint = os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
-            if env_endpoint:
-                self.otlp_endpoint = env_endpoint
+            # Check BOTANU_COLLECTOR_ENDPOINT first, then OTEL_* vars
+            botanu_endpoint = os.getenv("BOTANU_COLLECTOR_ENDPOINT")
+            if botanu_endpoint:
+                self.otlp_endpoint = botanu_endpoint
             else:
-                base = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4318")
-                self.otlp_endpoint = f"{base}/v1/traces"
+                env_endpoint = os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
+                if env_endpoint:
+                    self.otlp_endpoint = env_endpoint
+                else:
+                    base = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4318")
+                    self.otlp_endpoint = base
 
         env_propagation_mode = os.getenv("BOTANU_PROPAGATION_MODE")
         if env_propagation_mode and env_propagation_mode in ("lean", "full"):
             self.propagation_mode = env_propagation_mode
+
+        # Export tuning via env vars
+        env_queue_size = os.getenv("BOTANU_MAX_QUEUE_SIZE")
+        if env_queue_size:
+            try:
+                self.max_queue_size = int(env_queue_size)
+            except ValueError:
+                pass
+
+        env_batch_size = os.getenv("BOTANU_MAX_EXPORT_BATCH_SIZE")
+        if env_batch_size:
+            try:
+                self.max_export_batch_size = int(env_batch_size)
+            except ValueError:
+                pass
+
+        env_export_timeout = os.getenv("BOTANU_EXPORT_TIMEOUT_MILLIS")
+        if env_export_timeout:
+            try:
+                self.export_timeout_millis = int(env_export_timeout)
+            except ValueError:
+                pass
 
     # ------------------------------------------------------------------
     # YAML loading
@@ -242,8 +276,9 @@ class BotanuConfig:
             otlp_endpoint=otlp.get("endpoint"),
             otlp_headers=otlp.get("headers"),
             max_export_batch_size=export.get("batch_size", 512),
-            max_queue_size=export.get("queue_size", 2048),
+            max_queue_size=export.get("queue_size", 65536),
             schedule_delay_millis=export.get("delay_ms", 5000),
+            export_timeout_millis=export.get("export_timeout_ms", 30000),
             propagation_mode=propagation.get("mode", "lean"),
             auto_instrument_packages=(auto_packages if auto_packages else BotanuConfig().auto_instrument_packages),
             _config_file=config_file,
@@ -269,6 +304,7 @@ class BotanuConfig:
                 "batch_size": self.max_export_batch_size,
                 "queue_size": self.max_queue_size,
                 "delay_ms": self.schedule_delay_millis,
+                "export_timeout_ms": self.export_timeout_millis,
             },
             "propagation": {
                 "mode": self.propagation_mode,

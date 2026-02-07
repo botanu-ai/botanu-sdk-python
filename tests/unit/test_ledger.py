@@ -275,3 +275,221 @@ class TestGlobalLedger:
         record_tool_attempted(run_id="run-123", tool_name="search")
 
         mock_ledger.tool_attempted.assert_called_once_with(run_id="run-123", tool_name="search")
+
+
+class TestAttemptLedgerEmitMocked:
+    """Tests for ledger methods with mocked _emit to verify event attributes."""
+
+    def _make_ledger(self):
+        ledger = AttemptLedger.__new__(AttemptLedger)
+        ledger._initialized = True
+        ledger._logger = mock.MagicMock()
+        ledger.service_name = "test-svc"
+        return ledger
+
+    def test_attempt_started_attributes(self):
+        ledger = self._make_ledger()
+        ledger._emit = mock.MagicMock()
+
+        ledger.attempt_started(
+            run_id="run-100",
+            use_case="billing",
+            attempt=2,
+            root_run_id="root-50",
+            workflow="invoice",
+            tenant_id="t-001",
+            deadline_ts=1700000000.0,
+        )
+
+        ledger._emit.assert_called_once()
+        event_type, _severity, attrs = ledger._emit.call_args[0]
+        assert event_type == LedgerEventType.ATTEMPT_STARTED
+        assert attrs["botanu.run_id"] == "run-100"
+        assert attrs["botanu.use_case"] == "billing"
+        assert attrs["botanu.attempt"] == 2
+        assert attrs["botanu.root_run_id"] == "root-50"
+        assert attrs["botanu.workflow"] == "invoice"
+        assert attrs["botanu.tenant_id"] == "t-001"
+        assert attrs["botanu.deadline_ts"] == 1700000000.0
+
+    def test_attempt_ended_success(self):
+        ledger = self._make_ledger()
+        ledger._emit = mock.MagicMock()
+
+        ledger.attempt_ended(
+            run_id="run-200",
+            status="success",
+            duration_ms=1500.0,
+        )
+
+        _, _severity, attrs = ledger._emit.call_args[0]
+        assert attrs["botanu.run_id"] == "run-200"
+        assert attrs["status"] == "success"
+        assert attrs["duration_ms"] == 1500.0
+
+    def test_attempt_ended_error(self):
+        ledger = self._make_ledger()
+        ledger._emit = mock.MagicMock()
+
+        ledger.attempt_ended(
+            run_id="run-201",
+            status="error",
+            error_class="ValueError",
+            reason_code="INVALID_INPUT",
+        )
+
+        _, _severity, attrs = ledger._emit.call_args[0]
+        assert attrs["status"] == "error"
+        assert attrs["error_class"] == "ValueError"
+        assert attrs["reason_code"] == "INVALID_INPUT"
+
+    def test_llm_attempted_full_attributes(self):
+        ledger = self._make_ledger()
+        ledger._emit = mock.MagicMock()
+
+        ledger.llm_attempted(
+            run_id="run-300",
+            provider="openai",
+            model="gpt-4",
+            operation="chat",
+            attempt_number=1,
+            input_tokens=500,
+            output_tokens=200,
+            cached_tokens=100,
+            duration_ms=800.0,
+            status="success",
+            provider_request_id="resp-abc",
+            estimated_cost_usd=0.0075,
+        )
+
+        _, _, attrs = ledger._emit.call_args[0]
+        assert attrs["gen_ai.provider.name"] == "openai"
+        assert attrs["gen_ai.request.model"] == "gpt-4"
+        assert attrs["gen_ai.usage.input_tokens"] == 500
+        assert attrs["gen_ai.usage.output_tokens"] == 200
+        assert attrs["botanu.usage.cached_tokens"] == 100
+        assert attrs["botanu.cost.estimated_usd"] == 0.0075
+
+    def test_tool_attempted_attributes(self):
+        ledger = self._make_ledger()
+        ledger._emit = mock.MagicMock()
+
+        ledger.tool_attempted(
+            run_id="run-400",
+            tool_name="search",
+            tool_call_id="call-xyz",
+            duration_ms=250.0,
+            items_returned=3,
+            bytes_processed=4096,
+        )
+
+        _, _, attrs = ledger._emit.call_args[0]
+        assert attrs["gen_ai.tool.name"] == "search"
+        assert attrs["gen_ai.tool.call.id"] == "call-xyz"
+        assert attrs["items_returned"] == 3
+        assert attrs["bytes_processed"] == 4096
+
+    def test_cancel_requested_attributes(self):
+        ledger = self._make_ledger()
+        ledger._emit = mock.MagicMock()
+
+        ledger.cancel_requested(
+            run_id="run-500",
+            reason="timeout",
+            requested_at_ms=1700000001000.0,
+        )
+
+        event_type, _, attrs = ledger._emit.call_args[0]
+        assert event_type == LedgerEventType.CANCEL_REQUESTED
+        assert attrs["cancellation.reason"] == "timeout"
+        assert attrs["cancellation.requested_at_ms"] == 1700000001000.0
+
+    def test_cancel_acknowledged_attributes(self):
+        ledger = self._make_ledger()
+        ledger._emit = mock.MagicMock()
+
+        ledger.cancel_acknowledged(
+            run_id="run-600",
+            acknowledged_by="worker-3",
+            latency_ms=150.0,
+        )
+
+        event_type, _, attrs = ledger._emit.call_args[0]
+        assert event_type == LedgerEventType.CANCEL_ACKNOWLEDGED
+        assert attrs["cancellation.acknowledged_by"] == "worker-3"
+        assert attrs["cancellation.latency_ms"] == 150.0
+
+    def test_zombie_detected_attributes(self):
+        ledger = self._make_ledger()
+        ledger._emit = mock.MagicMock()
+
+        ledger.zombie_detected(
+            run_id="run-700",
+            deadline_ts=1000.0,
+            actual_end_ts=5000.0,
+            zombie_duration_ms=4000.0,
+            component="agent_loop",
+        )
+
+        event_type, _, attrs = ledger._emit.call_args[0]
+        assert event_type == LedgerEventType.ZOMBIE_DETECTED
+        assert attrs["zombie_duration_ms"] == 4000.0
+        assert attrs["zombie_component"] == "agent_loop"
+
+    def test_redelivery_detected_attributes(self):
+        ledger = self._make_ledger()
+        ledger._emit = mock.MagicMock()
+
+        ledger.redelivery_detected(
+            run_id="run-800",
+            queue_name="tasks-queue",
+            delivery_count=3,
+            original_message_id="msg-original",
+        )
+
+        event_type, _, attrs = ledger._emit.call_args[0]
+        assert event_type == LedgerEventType.REDELIVERY_DETECTED
+        assert attrs["queue.name"] == "tasks-queue"
+        assert attrs["delivery_count"] == 3
+        assert attrs["original_message_id"] == "msg-original"
+
+    def test_attempt_started_default_root_run_id(self):
+        """root_run_id defaults to run_id when not provided."""
+        ledger = self._make_ledger()
+        ledger._emit = mock.MagicMock()
+
+        ledger.attempt_started(run_id="run-solo", use_case="test")
+
+        _, _, attrs = ledger._emit.call_args[0]
+        assert attrs["botanu.root_run_id"] == "run-solo"
+
+    def test_cancel_requested_auto_timestamp(self):
+        """requested_at_ms uses current time when not provided."""
+        ledger = self._make_ledger()
+        ledger._emit = mock.MagicMock()
+
+        ledger.cancel_requested(run_id="run-ts", reason="user")
+
+        _, _, attrs = ledger._emit.call_args[0]
+        assert attrs["cancellation.requested_at_ms"] > 0
+
+
+class TestLedgerGlobalReset:
+    """Tests for global ledger cleanup."""
+
+    def test_set_ledger_overrides_default(self):
+        import botanu.tracking.ledger as ledger_module
+
+        ledger_module._global_ledger = None
+        default = get_ledger()
+
+        custom = AttemptLedger.__new__(AttemptLedger)
+        custom._initialized = False
+        custom.service_name = "override"
+        set_ledger(custom)
+
+        assert get_ledger() is custom
+        assert get_ledger() is not default
+
+        # Cleanup
+        ledger_module._global_ledger = None

@@ -10,6 +10,7 @@ from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+from opentelemetry.sdk.trace.sampling import ALWAYS_ON
 
 # Module-level provider and exporter to avoid "cannot override" warnings
 _provider: TracerProvider = None
@@ -21,7 +22,7 @@ def _get_or_create_provider() -> tuple[TracerProvider, InMemorySpanExporter]:
     global _provider, _exporter
 
     if _provider is None:
-        _provider = TracerProvider()
+        _provider = TracerProvider(sampler=ALWAYS_ON)
         _exporter = InMemorySpanExporter()
         _provider.add_span_processor(SimpleSpanProcessor(_exporter))
         trace.set_tracer_provider(_provider)

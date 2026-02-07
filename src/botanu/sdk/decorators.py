@@ -16,14 +16,17 @@ from __future__ import annotations
 import functools
 import hashlib
 import inspect
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Optional, TypeVar, Union
 
+from opentelemetry import baggage as otel_baggage
 from opentelemetry import trace
+from opentelemetry.context import attach, detach, get_current
 from opentelemetry.trace import SpanKind, Status, StatusCode
 
 from botanu.models.run_context import RunContext, RunStatus
-from botanu.sdk.context import get_baggage, set_baggage
+from botanu.sdk.context import get_baggage
 
 T = TypeVar("T")
 
@@ -112,14 +115,18 @@ def botanu_use_case(
                     },
                 )
 
+                ctx = get_current()
                 for key, value in run_ctx.to_baggage_dict().items():
-                    set_baggage(key, value)
+                    ctx = otel_baggage.set_baggage(key, value, context=ctx)
+                baggage_token = attach(ctx)
 
                 try:
                     result = await func(*args, **kwargs)
 
                     span_attrs = getattr(span, "attributes", None)
-                    existing_outcome = span_attrs.get("botanu.outcome.status") if isinstance(span_attrs, dict) else None
+                    existing_outcome = (
+                        span_attrs.get("botanu.outcome.status") if isinstance(span_attrs, Mapping) else None
+                    )
 
                     if existing_outcome is None and auto_outcome_on_success:
                         run_ctx.complete(RunStatus.SUCCESS)
@@ -139,6 +146,8 @@ def botanu_use_case(
                         error_class=exc.__class__.__name__,
                     )
                     raise
+                finally:
+                    detach(baggage_token)
 
         @functools.wraps(func)
         def sync_wrapper(*args: Any, **kwargs: Any) -> T:
@@ -168,14 +177,18 @@ def botanu_use_case(
                     },
                 )
 
+                ctx = get_current()
                 for key, value in run_ctx.to_baggage_dict().items():
-                    set_baggage(key, value)
+                    ctx = otel_baggage.set_baggage(key, value, context=ctx)
+                baggage_token = attach(ctx)
 
                 try:
                     result = func(*args, **kwargs)
 
                     span_attrs = getattr(span, "attributes", None)
-                    existing_outcome = span_attrs.get("botanu.outcome.status") if isinstance(span_attrs, dict) else None
+                    existing_outcome = (
+                        span_attrs.get("botanu.outcome.status") if isinstance(span_attrs, Mapping) else None
+                    )
 
                     if existing_outcome is None and auto_outcome_on_success:
                         run_ctx.complete(RunStatus.SUCCESS)
@@ -195,6 +208,8 @@ def botanu_use_case(
                         error_class=exc.__class__.__name__,
                     )
                     raise
+                finally:
+                    detach(baggage_token)
 
         if is_async:
             return async_wrapper  # type: ignore[return-value]
@@ -230,7 +245,6 @@ def _emit_run_completed(
     span.set_attribute("botanu.run.duration_ms", duration_ms)
 
 
-# Alias
 use_case = botanu_use_case
 
 

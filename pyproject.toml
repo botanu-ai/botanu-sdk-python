@@ -42,11 +42,77 @@ classifiers = [
     "Typing :: Typed",
 ]
 
-# Core dependency — opentelemetry-api only (~50 KB, zero transitive deps).
-# Everything else is behind optional extras so adopters never pay for what
-# they don't use.
+# All dependencies included in base install.  OTel instrumentation packages
+# are lightweight shims (~few KB each) that silently no-op when the target
+# library is not installed, so there is zero bloat for unused instrumentations.
 dependencies = [
+    # ── OTel core + SDK + exporter ─────────────────────────────────
     "opentelemetry-api >= 1.20.0",
+    "opentelemetry-sdk >= 1.20.0",
+    "opentelemetry-exporter-otlp-proto-http >= 1.20.0",
+    "opentelemetry-instrumentation >= 0.41b0",
+
+    # ── HTTP clients ───────────────────────────────────────────────
+    "opentelemetry-instrumentation-httpx >= 0.41b0",
+    "opentelemetry-instrumentation-requests >= 0.41b0",
+    "opentelemetry-instrumentation-urllib3 >= 0.41b0",
+    "opentelemetry-instrumentation-urllib >= 0.41b0",
+    "opentelemetry-instrumentation-aiohttp-client >= 0.41b0",
+    "opentelemetry-instrumentation-aiohttp-server >= 0.41b0",
+
+    # ── Web frameworks ─────────────────────────────────────────────
+    "opentelemetry-instrumentation-fastapi >= 0.41b0",
+    "opentelemetry-instrumentation-flask >= 0.41b0",
+    "opentelemetry-instrumentation-django >= 0.41b0",
+    "opentelemetry-instrumentation-starlette >= 0.41b0",
+    "opentelemetry-instrumentation-falcon >= 0.41b0",
+    "opentelemetry-instrumentation-pyramid >= 0.41b0",
+    "opentelemetry-instrumentation-tornado >= 0.41b0",
+
+    # ── gRPC ───────────────────────────────────────────────────────
+    "opentelemetry-instrumentation-grpc >= 0.41b0",
+
+    # ── Databases ──────────────────────────────────────────────────
+    "opentelemetry-instrumentation-sqlalchemy >= 0.41b0",
+    "opentelemetry-instrumentation-psycopg2 >= 0.41b0",
+    "opentelemetry-instrumentation-psycopg >= 0.41b0",
+    "opentelemetry-instrumentation-asyncpg >= 0.41b0",
+    "opentelemetry-instrumentation-aiopg >= 0.41b0",
+    "opentelemetry-instrumentation-pymongo >= 0.41b0",
+    "opentelemetry-instrumentation-redis >= 0.41b0",
+    "opentelemetry-instrumentation-mysql >= 0.41b0",
+    "opentelemetry-instrumentation-mysqlclient >= 0.41b0",
+    "opentelemetry-instrumentation-pymysql >= 0.41b0",
+    "opentelemetry-instrumentation-sqlite3 >= 0.41b0",
+    "opentelemetry-instrumentation-elasticsearch >= 0.41b0",
+    "opentelemetry-instrumentation-cassandra >= 0.41b0",
+    "opentelemetry-instrumentation-tortoiseorm >= 0.41b0",
+    "opentelemetry-instrumentation-pymemcache >= 0.41b0",
+
+    # ── Messaging / Task queues ────────────────────────────────────
+    "opentelemetry-instrumentation-celery >= 0.41b0",
+    "opentelemetry-instrumentation-kafka-python >= 0.41b0",
+    "opentelemetry-instrumentation-confluent-kafka >= 0.41b0",
+    "opentelemetry-instrumentation-aiokafka >= 0.41b0",
+    "opentelemetry-instrumentation-pika >= 0.41b0",
+    "opentelemetry-instrumentation-aio-pika >= 0.41b0",
+
+    # ── AWS ────────────────────────────────────────────────────────
+    "opentelemetry-instrumentation-botocore >= 0.41b0",
+    "opentelemetry-instrumentation-boto3sqs >= 0.41b0",
+
+    # ── GenAI / AI ─────────────────────────────────────────────────
+    "opentelemetry-instrumentation-openai-v2 >= 2.0b0",
+    "opentelemetry-instrumentation-anthropic >= 0.1b0",
+    "opentelemetry-instrumentation-vertexai >= 0.1b0",
+    "opentelemetry-instrumentation-google-generativeai >= 0.1b0",
+    "opentelemetry-instrumentation-langchain >= 0.1b0",
+    "opentelemetry-instrumentation-ollama >= 0.1b0",
+    "opentelemetry-instrumentation-crewai >= 0.1b0",
+
+    # ── Runtime / Concurrency ──────────────────────────────────────
+    "opentelemetry-instrumentation-logging >= 0.41b0",
+    "opentelemetry-instrumentation-threading >= 0.41b0",
 ]
 
 [project.urls]
@@ -57,61 +123,17 @@ Changelog = "https://github.com/botanu-ai/botanu-sdk-python/blob/main/CHANGELOG.
 Issues = "https://github.com/botanu-ai/botanu-sdk-python/issues"
 
 # ---------------------------------------------------------------------------
-# Optional extras
+# Optional extras  (dev only — base install includes everything)
 # ---------------------------------------------------------------------------
 [project.optional-dependencies]
-# Full OTel SDK + OTLP exporter — needed only when running standalone
-# (no pre-existing TracerProvider from Datadog / Splunk / etc.)
-sdk = [
-    "opentelemetry-sdk >= 1.20.0",
-    "opentelemetry-exporter-otlp-proto-http >= 1.20.0",
-]
-
-# Auto-instrumentation libraries for common frameworks
-instruments = [
-    "opentelemetry-instrumentation >= 0.41b0",
-    "opentelemetry-instrumentation-fastapi >= 0.41b0",
-    "opentelemetry-instrumentation-requests >= 0.41b0",
-    "opentelemetry-instrumentation-httpx >= 0.41b0",
-    "opentelemetry-instrumentation-flask >= 0.41b0",
-    "opentelemetry-instrumentation-django >= 0.41b0",
-    "opentelemetry-instrumentation-urllib3 >= 0.41b0",
-    "opentelemetry-instrumentation-starlette >= 0.41b0",
-    "opentelemetry-instrumentation-sqlalchemy >= 0.41b0",
-    "opentelemetry-instrumentation-redis >= 0.41b0",
-    "opentelemetry-instrumentation-celery >= 0.41b0",
-    "opentelemetry-instrumentation-grpc >= 0.41b0",
-    "opentelemetry-instrumentation-logging >= 0.41b0",
-]
-
-# GenAI / AI model auto-instrumentation
-genai = [
-    "opentelemetry-instrumentation-openai-v2 >= 2.0b0",
-    "opentelemetry-instrumentation-anthropic >= 0.1b0",
-    "opentelemetry-instrumentation-vertexai >= 0.1b0",
-    "opentelemetry-instrumentation-google-genai >= 0.1b0",
-    "opentelemetry-instrumentation-langchain >= 0.1b0",
-]
-
-# Cross-service carrier propagation (SQS, Kafka, Celery, Redis)
-carriers = [
-    "celery >= 5.0.0",
-    "aiokafka >= 0.8.0",
-]
-
-# Everything
-all = [
-    "botanu[sdk,instruments,genai,carriers]",
-]
-
-# Development / CI
 dev = [
-    "botanu[all]",
     "pytest >= 7.4.0",
     "pytest-asyncio >= 0.21.0",
     "pytest-cov >= 4.1.0",
     "coverage[toml] >= 7.0",
     "httpx >= 0.24.0",
+    "starlette >= 0.27.0, < 0.30.0; python_version < '3.10'",
+    "starlette >= 0.27.0; python_version >= '3.10'",
     "ruff >= 0.4.0",
     "mypy >= 1.7.0",
     "pre-commit >= 3.5.0",

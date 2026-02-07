@@ -12,12 +12,12 @@ from __future__ import annotations
 import uuid
 from typing import Optional
 
-from opentelemetry import baggage, trace
+from opentelemetry import baggage as otel_baggage
+from opentelemetry import trace
+from opentelemetry.context import attach, detach, get_current
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
-
-from botanu.sdk.context import set_baggage
 
 
 class BotanuMiddleware(BaseHTTPMiddleware):
@@ -59,37 +59,44 @@ class BotanuMiddleware(BaseHTTPMiddleware):
         """Process request and enrich span with Botanu context."""
         span = trace.get_current_span()
 
-        # Extract run_id from baggage or headers
-        run_id = baggage.get_baggage("botanu.run_id")
+        run_id = otel_baggage.get_baggage("botanu.run_id")
         if not run_id:
             run_id = request.headers.get("x-botanu-run-id")
 
         if not run_id and self.auto_generate_run_id:
             run_id = str(uuid.uuid4())
 
-        use_case = baggage.get_baggage("botanu.use_case") or request.headers.get("x-botanu-use-case") or self.use_case
-        workflow = baggage.get_baggage("botanu.workflow") or request.headers.get("x-botanu-workflow") or self.workflow
-        customer_id = baggage.get_baggage("botanu.customer_id") or request.headers.get("x-botanu-customer-id")
+        use_case = (
+            otel_baggage.get_baggage("botanu.use_case") or request.headers.get("x-botanu-use-case") or self.use_case
+        )
+        workflow = (
+            otel_baggage.get_baggage("botanu.workflow") or request.headers.get("x-botanu-workflow") or self.workflow
+        )
+        customer_id = otel_baggage.get_baggage("botanu.customer_id") or request.headers.get("x-botanu-customer-id")
 
-        # Enrich span with Botanu attributes
         if run_id:
             span.set_attribute("botanu.run_id", run_id)
-            set_baggage("botanu.run_id", run_id)
-
         span.set_attribute("botanu.use_case", use_case)
-        set_baggage("botanu.use_case", use_case)
-
         span.set_attribute("botanu.workflow", workflow)
-        set_baggage("botanu.workflow", workflow)
-
         if customer_id:
             span.set_attribute("botanu.customer_id", customer_id)
-            set_baggage("botanu.customer_id", customer_id)
 
         span.set_attribute("http.route", request.url.path)
         span.set_attribute("http.method", request.method)
 
-        response = await call_next(request)  # type: ignore[misc]
+        ctx = get_current()
+        if run_id:
+            ctx = otel_baggage.set_baggage("botanu.run_id", run_id, context=ctx)
+        ctx = otel_baggage.set_baggage("botanu.use_case", use_case, context=ctx)
+        ctx = otel_baggage.set_baggage("botanu.workflow", workflow, context=ctx)
+        if customer_id:
+            ctx = otel_baggage.set_baggage("botanu.customer_id", customer_id, context=ctx)
+
+        baggage_token = attach(ctx)
+        try:
+            response = await call_next(request)  # type: ignore[misc]
+        finally:
+            detach(baggage_token)
 
         if run_id:
             response.headers["x-botanu-run-id"] = run_id

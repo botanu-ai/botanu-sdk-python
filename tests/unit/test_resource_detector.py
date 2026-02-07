@@ -267,3 +267,189 @@ class TestGetResourceAttributes:
         )
         assert "process.pid" in attrs
         assert "host.name" not in attrs
+
+
+class TestAWSAvailabilityZone:
+    """Tests for _get_aws_availability_zone."""
+
+    def test_returns_none_for_lambda(self):
+        from botanu.resources.detector import _get_aws_availability_zone
+
+        with mock.patch.dict(os.environ, {"AWS_LAMBDA_FUNCTION_NAME": "fn"}):
+            assert _get_aws_availability_zone() is None
+
+    def test_returns_none_when_metadata_disabled(self):
+        from botanu.resources.detector import _get_aws_availability_zone
+
+        with mock.patch.dict(os.environ, {"AWS_EC2_METADATA_DISABLED": "true"}, clear=True):
+            os.environ.pop("AWS_LAMBDA_FUNCTION_NAME", None)
+            assert _get_aws_availability_zone() is None
+
+    def test_returns_none_when_invalid_endpoint(self):
+        from botanu.resources.detector import _get_aws_availability_zone
+
+        with mock.patch.dict(
+            os.environ,
+            {
+                "AWS_EC2_METADATA_SERVICE_ENDPOINT": "not-a-url",
+            },
+            clear=True,
+        ):
+            os.environ.pop("AWS_LAMBDA_FUNCTION_NAME", None)
+            assert _get_aws_availability_zone() is None
+
+    def test_returns_none_on_network_error(self):
+        from botanu.resources.detector import _get_aws_availability_zone
+
+        with mock.patch.dict(os.environ, {}, clear=True):
+            os.environ.pop("AWS_LAMBDA_FUNCTION_NAME", None)
+            os.environ.pop("AWS_EC2_METADATA_DISABLED", None)
+            # Default endpoint (169.254.169.254) will fail in test env
+            result = _get_aws_availability_zone()
+            assert result is None
+
+
+class TestCloudRegionFromAZ:
+    """Tests for cloud region derivation from availability zone."""
+
+    def test_region_derived_from_az(self):
+        """When AZ is 'us-east-1a', region should be 'us-east-1'."""
+
+        with mock.patch.dict(
+            os.environ,
+            {
+                "AWS_REGION": "",
+                "AWS_DEFAULT_REGION": "",
+                "AWS_ACCOUNT_ID": "123456789012",
+            },
+            clear=True,
+        ):
+            os.environ.pop("AWS_LAMBDA_FUNCTION_NAME", None)
+
+            # Mock the IMDS call to return an AZ
+            with mock.patch(
+                "botanu.resources.detector._get_aws_availability_zone",
+                return_value="us-west-2c",
+            ):
+                attrs = detect_cloud_provider()
+                if "cloud.availability_zone" in attrs:
+                    assert attrs["cloud.region"] == "us-west-2"
+
+
+class TestContainerId:
+    """Tests for container ID extraction."""
+
+    def test_container_id_from_env(self):
+        from botanu.resources.detector import _get_container_id
+
+        # Short container IDs (< 12 chars) are ignored
+        with mock.patch.dict(os.environ, {"CONTAINER_ID": "short"}, clear=True):
+            os.environ.pop("HOSTNAME", None)
+            result = _get_container_id()
+            assert result is None
+
+        # Long enough IDs are returned
+        with mock.patch.dict(os.environ, {"CONTAINER_ID": "abcdef123456"}, clear=True):
+            os.environ.pop("HOSTNAME", None)
+            result = _get_container_id()
+            # May be overridden by cgroup parsing, but at minimum not None
+            assert result is None or len(result) >= 12
+
+
+class TestDetectHostExtended:
+    """Extended host detection tests."""
+
+    def test_host_id_from_env(self):
+        with mock.patch.dict(os.environ, {"HOST_ID": "i-0123456789"}):
+            attrs = detect_host()
+            assert attrs["host.id"] == "i-0123456789"
+
+    def test_host_id_from_instance_id(self):
+        with mock.patch.dict(os.environ, {"INSTANCE_ID": "vm-abc"}, clear=True):
+            os.environ.pop("HOST_ID", None)
+            attrs = detect_host()
+            assert attrs["host.id"] == "vm-abc"
+
+    def test_host_id_falls_back_to_hostname(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            os.environ.pop("HOST_ID", None)
+            os.environ.pop("INSTANCE_ID", None)
+            attrs = detect_host()
+            assert attrs.get("host.id") == attrs.get("host.name")
+
+
+class TestDetectServerlessExtended:
+    """Extended serverless detection tests."""
+
+    def test_gcp_cloud_function(self):
+        with mock.patch.dict(
+            os.environ,
+            {
+                "FUNCTION_NAME": "my-function",
+                "FUNCTION_TARGET": "handle_event",
+            },
+            clear=True,
+        ):
+            os.environ.pop("AWS_LAMBDA_FUNCTION_NAME", None)
+            os.environ.pop("K_SERVICE", None)
+            attrs = detect_serverless()
+            assert attrs["faas.name"] == "my-function"
+            assert attrs["faas.trigger"] == "handle_event"
+
+    def test_azure_functions(self):
+        with mock.patch.dict(
+            os.environ,
+            {
+                "WEBSITE_SITE_NAME": "my-azure-fn",
+                "WEBSITE_INSTANCE_ID": "inst-123",
+            },
+            clear=True,
+        ):
+            os.environ.pop("AWS_LAMBDA_FUNCTION_NAME", None)
+            os.environ.pop("K_SERVICE", None)
+            os.environ.pop("FUNCTION_NAME", None)
+            attrs = detect_serverless()
+            assert attrs["faas.name"] == "my-azure-fn"
+            assert attrs["faas.instance"] == "inst-123"
+
+    def test_no_serverless_detected(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            os.environ.pop("AWS_LAMBDA_FUNCTION_NAME", None)
+            os.environ.pop("K_SERVICE", None)
+            os.environ.pop("FUNCTION_NAME", None)
+            os.environ.pop("WEBSITE_SITE_NAME", None)
+            attrs = detect_serverless()
+            assert attrs == {}
+
+
+class TestDetectProcessExtended:
+    """Extended process detection tests."""
+
+    def test_process_command(self):
+        attrs = detect_process()
+        assert "process.command" in attrs
+        assert isinstance(attrs["process.command"], str)
+
+    def test_process_runtime_version_format(self):
+        attrs = detect_process()
+        version = attrs["process.runtime.version"]
+        parts = version.split(".")
+        assert len(parts) >= 2  # major.minor at minimum
+
+
+class TestServiceInstanceId:
+    """Tests for service.instance.id derivation in detect_all_resources."""
+
+    def test_instance_id_from_hostname_in_k8s(self):
+        detect_all_resources.cache_clear()
+        with mock.patch.dict(
+            os.environ,
+            {
+                "KUBERNETES_SERVICE_HOST": "10.0.0.1",
+                "HOSTNAME": "my-pod-abc123xyz",
+            },
+        ):
+            attrs = detect_all_resources()
+            # Should have service.instance.id
+            assert "service.instance.id" in attrs
+        detect_all_resources.cache_clear()

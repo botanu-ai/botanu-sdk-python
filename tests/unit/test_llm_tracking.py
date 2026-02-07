@@ -305,3 +305,233 @@ class TestGenAIAttributeConstants:
         assert BotanuAttributes.CACHE_HIT == "botanu.request.cache_hit"
         assert BotanuAttributes.ATTEMPT_NUMBER == "botanu.request.attempt"
         assert BotanuAttributes.VENDOR == "botanu.vendor"
+
+
+class TestTrackToolCall:
+    """Tests for track_tool_call context manager."""
+
+    def test_creates_span(self, memory_exporter):
+        from botanu.tracking.llm import track_tool_call
+
+        with track_tool_call(tool_name="search"):
+            pass
+
+        spans = memory_exporter.get_finished_spans()
+        assert len(spans) == 1
+        assert spans[0].name == "execute_tool search"
+
+    def test_tool_call_attributes(self, memory_exporter):
+        from botanu.tracking.llm import track_tool_call
+
+        with track_tool_call(
+            tool_name="web_search",
+            tool_call_id="call_abc123",
+            provider="tavily",
+        ):
+            pass
+
+        spans = memory_exporter.get_finished_spans()
+        attrs = dict(spans[0].attributes)
+        assert attrs[GenAIAttributes.TOOL_NAME] == "web_search"
+        assert attrs[GenAIAttributes.TOOL_CALL_ID] == "call_abc123"
+        assert attrs[GenAIAttributes.OPERATION_NAME] == "execute_tool"
+
+    def test_tool_tracker_set_result(self, memory_exporter):
+        from botanu.tracking.llm import BotanuAttributes, track_tool_call
+
+        with track_tool_call(tool_name="db_query") as tracker:
+            tracker.set_result(success=True, items_returned=42, bytes_processed=8192)
+
+        spans = memory_exporter.get_finished_spans()
+        attrs = dict(spans[0].attributes)
+        assert attrs[BotanuAttributes.TOOL_SUCCESS] is True
+        assert attrs[BotanuAttributes.TOOL_ITEMS_RETURNED] == 42
+        assert attrs[BotanuAttributes.TOOL_BYTES_PROCESSED] == 8192
+
+    def test_tool_tracker_set_error(self, memory_exporter):
+        from botanu.tracking.llm import track_tool_call
+
+        with pytest.raises(ConnectionError):
+            with track_tool_call(tool_name="api_call"):
+                raise ConnectionError("Service down")
+
+        spans = memory_exporter.get_finished_spans()
+        attrs = dict(spans[0].attributes)
+        assert attrs[GenAIAttributes.ERROR_TYPE] == "ConnectionError"
+
+    def test_tool_tracker_set_tool_call_id(self, memory_exporter):
+        from botanu.tracking.llm import track_tool_call
+
+        with track_tool_call(tool_name="calc") as tracker:
+            tracker.set_tool_call_id("call_xyz789")
+
+        spans = memory_exporter.get_finished_spans()
+        attrs = dict(spans[0].attributes)
+        assert attrs[GenAIAttributes.TOOL_CALL_ID] == "call_xyz789"
+
+    def test_tool_tracker_add_metadata(self, memory_exporter):
+        from botanu.tracking.llm import track_tool_call
+
+        with track_tool_call(tool_name="search") as tracker:
+            tracker.add_metadata(query="python otel", source="web")
+
+        spans = memory_exporter.get_finished_spans()
+        attrs = dict(spans[0].attributes)
+        assert attrs["botanu.tool.query"] == "python otel"
+        assert attrs["botanu.tool.source"] == "web"
+
+    def test_tool_duration_recorded(self, memory_exporter):
+        from botanu.tracking.llm import BotanuAttributes, track_tool_call
+
+        with track_tool_call(tool_name="slow_tool"):
+            pass
+
+        spans = memory_exporter.get_finished_spans()
+        attrs = dict(spans[0].attributes)
+        assert BotanuAttributes.TOOL_DURATION_MS in attrs
+        assert attrs[BotanuAttributes.TOOL_DURATION_MS] >= 0
+
+
+class TestStandaloneHelpers:
+    """Tests for set_llm_attributes and set_token_usage."""
+
+    def test_set_llm_attributes(self, memory_exporter):
+        from opentelemetry import trace as otl_trace
+
+        from botanu.tracking.llm import BotanuAttributes, set_llm_attributes
+
+        tracer = otl_trace.get_tracer("test")
+        with tracer.start_as_current_span("test-llm-attrs"):
+            set_llm_attributes(
+                provider="openai",
+                model="gpt-4",
+                input_tokens=150,
+                output_tokens=75,
+                streaming=True,
+                provider_request_id="resp_abc",
+            )
+
+        spans = memory_exporter.get_finished_spans()
+        attrs = dict(spans[0].attributes)
+        assert attrs[GenAIAttributes.PROVIDER_NAME] == "openai"
+        assert attrs[GenAIAttributes.REQUEST_MODEL] == "gpt-4"
+        assert attrs[GenAIAttributes.USAGE_INPUT_TOKENS] == 150
+        assert attrs[GenAIAttributes.USAGE_OUTPUT_TOKENS] == 75
+        assert attrs[BotanuAttributes.STREAMING] is True
+        assert attrs[GenAIAttributes.RESPONSE_ID] == "resp_abc"
+
+    def test_set_llm_attributes_no_active_span(self):
+        from botanu.tracking.llm import set_llm_attributes
+
+        # Should not raise when no recording span
+        set_llm_attributes(provider="openai", model="gpt-4")
+
+    def test_set_token_usage(self, memory_exporter):
+        from opentelemetry import trace as otl_trace
+
+        from botanu.tracking.llm import BotanuAttributes, set_token_usage
+
+        tracer = otl_trace.get_tracer("test")
+        with tracer.start_as_current_span("test-token-usage"):
+            set_token_usage(input_tokens=200, output_tokens=100, cached_tokens=50)
+
+        spans = memory_exporter.get_finished_spans()
+        attrs = dict(spans[0].attributes)
+        assert attrs[GenAIAttributes.USAGE_INPUT_TOKENS] == 200
+        assert attrs[GenAIAttributes.USAGE_OUTPUT_TOKENS] == 100
+        assert attrs[BotanuAttributes.TOKENS_CACHED] == 50
+
+    def test_set_token_usage_no_active_span(self):
+        from botanu.tracking.llm import set_token_usage
+
+        # Should not raise when no recording span
+        set_token_usage(input_tokens=10, output_tokens=5)
+
+
+class TestLLMInstrumentedDecorator:
+    """Tests for the llm_instrumented decorator."""
+
+    def test_decorator_creates_span(self, memory_exporter):
+        from botanu.tracking.llm import llm_instrumented
+
+        @llm_instrumented(provider="openai")
+        def fake_completion(prompt, model="gpt-4"):
+            class _Usage:
+                prompt_tokens = 10
+                completion_tokens = 20
+
+            class _Response:
+                usage = _Usage()
+
+            return _Response()
+
+        result = fake_completion("Hello", model="gpt-4")
+        assert result is not None
+
+        spans = memory_exporter.get_finished_spans()
+        assert len(spans) == 1
+        attrs = dict(spans[0].attributes)
+        assert attrs[GenAIAttributes.PROVIDER_NAME] == "openai"
+        assert attrs[GenAIAttributes.REQUEST_MODEL] == "gpt-4"
+        assert attrs[GenAIAttributes.USAGE_INPUT_TOKENS] == 10
+        assert attrs[GenAIAttributes.USAGE_OUTPUT_TOKENS] == 20
+
+    def test_decorator_with_streaming(self, memory_exporter):
+        from botanu.tracking.llm import BotanuAttributes, llm_instrumented
+
+        @llm_instrumented(provider="anthropic")
+        def fake_stream(prompt, model="claude-3", stream=False):
+            return "streamed"
+
+        fake_stream("Hi", model="claude-3", stream=True)
+
+        spans = memory_exporter.get_finished_spans()
+        attrs = dict(spans[0].attributes)
+        assert attrs[BotanuAttributes.STREAMING] is True
+
+    def test_decorator_without_usage(self, memory_exporter):
+        from botanu.tracking.llm import llm_instrumented
+
+        @llm_instrumented(provider="custom", tokens_from_response=False)
+        def no_usage_fn(prompt, model="custom-model"):
+            return "done"
+
+        no_usage_fn("test", model="custom-model")
+
+        spans = memory_exporter.get_finished_spans()
+        attrs = dict(spans[0].attributes)
+        assert GenAIAttributes.USAGE_INPUT_TOKENS not in attrs
+
+
+class TestClientRequestId:
+    """Tests for client_request_id passthrough."""
+
+    def test_client_request_id_on_track_llm_call(self, memory_exporter):
+        from botanu.tracking.llm import BotanuAttributes
+
+        with track_llm_call(
+            model="gpt-4",
+            provider="openai",
+            client_request_id="cli-req-001",
+        ):
+            pass
+
+        spans = memory_exporter.get_finished_spans()
+        attrs = dict(spans[0].attributes)
+        assert attrs[BotanuAttributes.CLIENT_REQUEST_ID] == "cli-req-001"
+
+
+class TestKwargsPassthrough:
+    """Tests for additional kwargs passed to track_llm_call."""
+
+    def test_custom_kwargs(self, memory_exporter):
+        with track_llm_call(
+            model="gpt-4",
+            provider="openai",
+            deployment_id="dep-001",
+        ):
+            pass
+
+        spans = memory_exporter.get_finished_spans()
+        attrs = dict(spans[0].attributes)
+        assert attrs["botanu.deployment_id"] == "dep-001"
