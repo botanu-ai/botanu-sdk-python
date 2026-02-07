@@ -1,0 +1,53 @@
+# SPDX-FileCopyrightText: 2026 The Botanu Authors
+# SPDX-License-Identifier: Apache-2.0
+
+name: Feature Request
+description: Suggest a new feature or enhancement
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting an improvement to Botanu SDK!
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: What problem does this feature solve? Is this related to a frustration?
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: Describe the solution you'd like. Include API sketches if possible.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any alternative approaches you've considered.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Which component does this affect?
+      multiple: true
+      options:
+        - Core SDK (bootstrap / attach)
+        - Run context / decorators
+        - Span processors
+        - Carrier propagation (SQS, Kafka, Celery)
+        - LLM / GenAI tracking
+        - Resource detection
+        - Collector configuration
+        - Documentation
+        - Other
+    validations:
+      required: true

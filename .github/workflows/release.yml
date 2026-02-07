@@ -1,0 +1,137 @@
+# SPDX-FileCopyrightText: 2026 The Botanu Authors
+# SPDX-License-Identifier: Apache-2.0
+
+name: Release to PyPI
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      publish_target:
+        description: 'Publish target'
+        required: true
+        default: 'testpypi'
+        type: choice
+        options:
+          - testpypi
+          - pypi
+
+permissions:
+  contents: read
+
+jobs:
+  # -------------------------------------------------------------------
+  # Build the package
+  # -------------------------------------------------------------------
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # hatch-vcs needs full history
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        run: pip install build twine
+
+      - name: Build sdist and wheel
+        run: python -m build
+
+      - name: Check package with twine
+        run: twine check dist/*
+
+      - name: List build artifacts
+        run: ls -la dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  # -------------------------------------------------------------------
+  # Publish to TestPyPI (manual trigger or pre-release tags)
+  # Uses Trusted Publishing (OIDC — no API tokens needed)
+  # Requires TestPyPI project to be configured for GitHub OIDC:
+  #   https://test.pypi.org/manage/project/botanu/settings/publishing/
+  # -------------------------------------------------------------------
+  publish-testpypi:
+    needs: build
+    if: >-
+      github.event_name == 'workflow_dispatch' && github.event.inputs.publish_target == 'testpypi'
+      || (github.event_name == 'push' && (contains(github.ref, '-alpha') || contains(github.ref, '-beta') || contains(github.ref, '-rc')))
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/botanu
+    permissions:
+      id-token: write  # required for OIDC trusted publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+
+  # -------------------------------------------------------------------
+  # Publish to PyPI via Trusted Publishing (OIDC — no API tokens)
+  # Requires PyPI project to be configured for GitHub OIDC:
+  #   https://pypi.org/manage/project/botanu/settings/publishing/
+  # -------------------------------------------------------------------
+  publish-pypi:
+    needs: build
+    if: |
+      github.event_name == 'workflow_dispatch' && github.event.inputs.publish_target == 'pypi'
+      || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-'))
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/botanu
+    permissions:
+      id-token: write  # required for OIDC trusted publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+  # -------------------------------------------------------------------
+  # Create GitHub Release with auto-generated notes
+  # -------------------------------------------------------------------
+  github-release:
+    needs: [build, publish-pypi]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ "${{ github.ref_name }}" == *"-"* ]]; then
+            gh release create "${{ github.ref_name }}" dist/* --generate-notes --prerelease
+          else
+            gh release create "${{ github.ref_name }}" dist/* --generate-notes
+          fi
