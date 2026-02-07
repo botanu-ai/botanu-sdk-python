@@ -207,7 +207,7 @@ class TestOperationEnums:
         assert MessagingOperation.PUBLISH == "publish"
         assert MessagingOperation.RECEIVE == "receive"
         assert MessagingOperation.CONSUME == "consume"
-
+        
 
 class TestSystemNormalization:
     """Tests for system name normalization maps."""
