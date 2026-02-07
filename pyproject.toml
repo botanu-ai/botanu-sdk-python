@@ -103,12 +103,12 @@ dependencies = [
 
     # ── GenAI / AI ─────────────────────────────────────────────────
     "opentelemetry-instrumentation-openai-v2 >= 2.0b0",
-    "opentelemetry-instrumentation-anthropic >= 0.1b0",
-    "opentelemetry-instrumentation-vertexai >= 0.1b0",
-    "opentelemetry-instrumentation-google-generativeai >= 0.1b0",
-    "opentelemetry-instrumentation-langchain >= 0.1b0",
+    "opentelemetry-instrumentation-anthropic >= 0.1b0; python_version >= '3.10'",
+    "opentelemetry-instrumentation-vertexai >= 0.1b0; python_version >= '3.10'",
+    "opentelemetry-instrumentation-google-generativeai >= 0.1b0; python_version >= '3.10'",
+    "opentelemetry-instrumentation-langchain >= 0.1b0; python_version >= '3.10'",
     "opentelemetry-instrumentation-ollama >= 0.1b0",
-    "opentelemetry-instrumentation-crewai >= 0.1b0",
+    "opentelemetry-instrumentation-crewai >= 0.1b0; python_version >= '3.10'",
 
     # ── Runtime / Concurrency ──────────────────────────────────────
     "opentelemetry-instrumentation-logging >= 0.41b0",
