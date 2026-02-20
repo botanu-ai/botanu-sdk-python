@@ -37,8 +37,7 @@ class BotanuMiddleware(BaseHTTPMiddleware):
         FastAPIInstrumentor.instrument_app(app)
         app.add_middleware(
             BotanuMiddleware,
-            use_case="customer_support",
-            workflow="ticket_api",
+            workflow="customer_support",
         )
     """
 
@@ -46,13 +45,11 @@ class BotanuMiddleware(BaseHTTPMiddleware):
         self,
         app: object,
         *,
-        use_case: str,
-        workflow: Optional[str] = None,
+        workflow: str,
         auto_generate_run_id: bool = True,
     ) -> None:
         super().__init__(app)  # type: ignore[arg-type]
-        self.use_case = use_case
-        self.workflow = workflow or use_case
+        self.workflow = workflow
         self.auto_generate_run_id = auto_generate_run_id
 
     async def dispatch(self, request: Request, call_next: object) -> Response:  # type: ignore[override]
@@ -66,9 +63,6 @@ class BotanuMiddleware(BaseHTTPMiddleware):
         if not run_id and self.auto_generate_run_id:
             run_id = str(uuid.uuid4())
 
-        use_case = (
-            otel_baggage.get_baggage("botanu.use_case") or request.headers.get("x-botanu-use-case") or self.use_case
-        )
         workflow = (
             otel_baggage.get_baggage("botanu.workflow") or request.headers.get("x-botanu-workflow") or self.workflow
         )
@@ -76,7 +70,6 @@ class BotanuMiddleware(BaseHTTPMiddleware):
 
         if run_id:
             span.set_attribute("botanu.run_id", run_id)
-        span.set_attribute("botanu.use_case", use_case)
         span.set_attribute("botanu.workflow", workflow)
         if customer_id:
             span.set_attribute("botanu.customer_id", customer_id)
@@ -87,7 +80,6 @@ class BotanuMiddleware(BaseHTTPMiddleware):
         ctx = get_current()
         if run_id:
             ctx = otel_baggage.set_baggage("botanu.run_id", run_id, context=ctx)
-        ctx = otel_baggage.set_baggage("botanu.use_case", use_case, context=ctx)
         ctx = otel_baggage.set_baggage("botanu.workflow", workflow, context=ctx)
         if customer_id:
             ctx = otel_baggage.set_baggage("botanu.customer_id", customer_id, context=ctx)
@@ -100,7 +92,6 @@ class BotanuMiddleware(BaseHTTPMiddleware):
 
         if run_id:
             response.headers["x-botanu-run-id"] = run_id
-        response.headers["x-botanu-use-case"] = use_case
         response.headers["x-botanu-workflow"] = workflow
 
         return response

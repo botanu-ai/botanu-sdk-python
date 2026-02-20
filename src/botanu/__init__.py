@@ -5,11 +5,11 @@
 
 Quick Start::
 
-    from botanu import enable, botanu_use_case, emit_outcome
+    from botanu import enable, botanu_workflow, emit_outcome
 
     enable()  # reads config from OTEL_SERVICE_NAME, OTEL_EXPORTER_OTLP_ENDPOINT env vars
 
-    @botanu_use_case(name="Customer Support")
+    @botanu_workflow(name="Customer Support")
     async def handle_request(data):
         result = await process(data)
         emit_outcome("success", value_type="tickets_resolved", value_amount=1)
@@ -38,12 +38,12 @@ from botanu.sdk.context import (
     get_baggage,
     get_current_span,
     get_run_id,
-    get_use_case,
+    get_workflow,
     set_baggage,
 )
 
 # Decorators  (primary integration point)
-from botanu.sdk.decorators import botanu_outcome, botanu_use_case, use_case
+from botanu.sdk.decorators import botanu_outcome, botanu_workflow, run_botanu, workflow
 
 # Span helpers
 from botanu.sdk.span_helpers import emit_outcome, set_business_context
@@ -56,9 +56,10 @@ __all__ = [
     "is_enabled",
     # Configuration
     "BotanuConfig",
-    # Decorators
-    "botanu_use_case",
-    "use_case",
+    # Decorators / context managers
+    "botanu_workflow",
+    "run_botanu",
+    "workflow",
     "botanu_outcome",
     # Span helpers
     "emit_outcome",
@@ -66,7 +67,7 @@ __all__ = [
     "get_current_span",
     # Context
     "get_run_id",
-    "get_use_case",
+    "get_workflow",
     "set_baggage",
     "get_baggage",
     # Run context

@@ -6,7 +6,7 @@
 The SDK is intentionally minimal on the hot path. Heavy processing happens in
 the OpenTelemetry Collector, not in the application:
 
-- **SDK responsibility**: Generate run_id, propagate minimal context (run_id, use_case)
+- **SDK responsibility**: Generate run_id, propagate minimal context (run_id, workflow)
 - **Collector responsibility**: PII redaction, vendor detection, attribute enrichment
 
 Configuration precedence (highest to lowest):
@@ -65,7 +65,7 @@ class BotanuConfig:
     schedule_delay_millis: int = 5000
     export_timeout_millis: int = 30000
 
-    # Propagation mode: "lean" (run_id + use_case only) or "full" (all context)
+    # Propagation mode: "lean" (run_id + workflow only) or "full" (all context)
     propagation_mode: str = "lean"
 
     # Auto-instrumentation packages to enable

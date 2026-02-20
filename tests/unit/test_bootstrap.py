@@ -656,15 +656,15 @@ class TestNoSamplingGuarantee:
 # ---------------------------------------------------------------------------
 
 
-class TestProviderReuse:
-    """Botanu must not create a second TracerProvider if one already exists."""
+class TestProviderCreation:
+    """Botanu must always create a fresh TracerProvider."""
 
-    def test_reuse_existing_provider_code_path(self):
-        """Bootstrap source must check for existing TracerProvider."""
+    def test_creates_new_provider(self):
+        """Bootstrap source must create a new TracerProvider."""
         import inspect
 
         from botanu.sdk import bootstrap
 
         source = inspect.getsource(bootstrap.enable)
-        assert "get_tracer_provider" in source, "enable() must check for existing TracerProvider"
-        assert "isinstance" in source, "enable() must use isinstance to check provider type"
+        assert "TracerProvider(" in source, "enable() must create a new TracerProvider"
+        assert "set_tracer_provider" in source, "enable() must call set_tracer_provider"

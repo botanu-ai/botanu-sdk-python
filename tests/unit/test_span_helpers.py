@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from opentelemetry import trace
+from opentelemetry import baggage, context, trace
 
 from botanu.sdk.span_helpers import emit_outcome, set_business_context
 
@@ -65,6 +65,48 @@ class TestEmitOutcome:
         events = [e for e in spans[0].events if e.name == "botanu.outcome_emitted"]
         assert len(events) == 1
         assert events[0].attributes["status"] == "success"
+
+    def test_emit_outcome_emits_log_record(self, memory_exporter, log_exporter):
+        """emit_outcome should emit an OTel log record when event_id is in baggage."""
+        tracer = trace.get_tracer("test")
+
+        # Set up baggage with event_id
+        ctx = context.Context()
+        ctx = baggage.set_baggage("botanu.event_id", "ticket-42", context=ctx)
+        token = context.attach(ctx)
+
+        try:
+            with tracer.start_as_current_span("test-span"):
+                emit_outcome("success")
+        finally:
+            context.detach(token)
+
+        # Verify log record was emitted
+        logs = log_exporter.get_finished_logs()
+        assert len(logs) >= 1
+
+        log = logs[0]
+        assert log.log_record.body == "outcome:success"
+        assert log.log_record.attributes["botanu.event_id"] == "ticket-42"
+        assert log.log_record.attributes["botanu.outcome.status"] == "success"
+
+    def test_emit_outcome_no_log_without_event_id(self, memory_exporter, log_exporter):
+        """emit_outcome should NOT emit a log record when no event_id in baggage."""
+        tracer = trace.get_tracer("test")
+
+        # No baggage set - use clean context
+        ctx = context.Context()
+        token = context.attach(ctx)
+
+        try:
+            with tracer.start_as_current_span("test-span"):
+                emit_outcome("success")
+        finally:
+            context.detach(token)
+
+        # No log records should be emitted
+        logs = log_exporter.get_finished_logs()
+        assert len(logs) == 0
 
 
 class TestSetBusinessContext:

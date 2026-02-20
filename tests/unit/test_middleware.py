@@ -15,7 +15,7 @@ from starlette.testclient import TestClient
 from botanu.sdk.middleware import BotanuMiddleware
 
 
-def _make_app(*, use_case: str = "test_uc", workflow: str | None = None, auto_generate_run_id: bool = True):
+def _make_app(*, workflow: str = "test_wf", auto_generate_run_id: bool = True):
     """Build a minimal Starlette app with BotanuMiddleware."""
 
     async def homepage(request):
@@ -24,7 +24,6 @@ def _make_app(*, use_case: str = "test_uc", workflow: str | None = None, auto_ge
     app = Starlette(routes=[Route("/", homepage)])
     app.add_middleware(
         BotanuMiddleware,
-        use_case=use_case,
         workflow=workflow,
         auto_generate_run_id=auto_generate_run_id,
     )
@@ -42,16 +41,11 @@ def _clean_otel_context():
 class TestBotanuMiddleware:
     """Tests for BotanuMiddleware dispatch behaviour."""
 
-    def test_response_contains_use_case_header(self, memory_exporter):
-        client = TestClient(_make_app(use_case="billing"))
+    def test_response_contains_workflow_header(self, memory_exporter):
+        client = TestClient(_make_app(workflow="billing"))
         resp = client.get("/")
         assert resp.status_code == 200
-        assert resp.headers["x-botanu-use-case"] == "billing"
-
-    def test_response_contains_workflow_header(self, memory_exporter):
-        client = TestClient(_make_app(use_case="billing", workflow="invoice_flow"))
-        resp = client.get("/")
-        assert resp.headers["x-botanu-workflow"] == "invoice_flow"
+        assert resp.headers["x-botanu-workflow"] == "billing"
 
     def test_auto_generated_run_id_in_response(self, memory_exporter):
         client = TestClient(_make_app())
@@ -65,13 +59,8 @@ class TestBotanuMiddleware:
         resp = client.get("/", headers={"x-botanu-run-id": "my-custom-run-123"})
         assert resp.headers["x-botanu-run-id"] == "my-custom-run-123"
 
-    def test_use_case_propagated_from_header(self, memory_exporter):
-        client = TestClient(_make_app(use_case="default_uc"))
-        resp = client.get("/", headers={"x-botanu-use-case": "overridden_uc"})
-        assert resp.headers["x-botanu-use-case"] == "overridden_uc"
-
     def test_workflow_propagated_from_header(self, memory_exporter):
-        client = TestClient(_make_app(use_case="uc", workflow="default_wf"))
+        client = TestClient(_make_app(workflow="default_wf"))
         resp = client.get("/", headers={"x-botanu-workflow": "overridden_wf"})
         assert resp.headers["x-botanu-workflow"] == "overridden_wf"
 
@@ -80,11 +69,6 @@ class TestBotanuMiddleware:
         resp = client.get("/")
         # Should not have a run_id header since none was provided and auto-gen is off
         assert "x-botanu-run-id" not in resp.headers
-
-    def test_workflow_defaults_to_use_case(self, memory_exporter):
-        client = TestClient(_make_app(use_case="my_uc"))
-        resp = client.get("/")
-        assert resp.headers["x-botanu-workflow"] == "my_uc"
 
     def test_customer_id_propagated_from_header(self, memory_exporter):
         client = TestClient(_make_app())
@@ -121,25 +105,23 @@ class TestMiddlewareBaggageIsolation:
         assert data2.get("run_id") != "leak-test-001"
 
     def test_header_priority_over_constructor_defaults(self, memory_exporter):
-        """x-botanu-use-case header should override constructor default."""
-        client = TestClient(_make_app(use_case="default_uc"))
-        resp = client.get("/", headers={"x-botanu-use-case": "header_uc"})
-        assert resp.headers["x-botanu-use-case"] == "header_uc"
+        """x-botanu-workflow header should override constructor default."""
+        client = TestClient(_make_app(workflow="default_wf"))
+        resp = client.get("/", headers={"x-botanu-workflow": "header_wf"})
+        assert resp.headers["x-botanu-workflow"] == "header_wf"
 
     def test_multiple_headers_propagated(self, memory_exporter):
         """All x-botanu-* headers should be propagated together."""
-        client = TestClient(_make_app(use_case="uc"))
+        client = TestClient(_make_app(workflow="wf"))
         resp = client.get(
             "/",
             headers={
                 "x-botanu-run-id": "multi-001",
-                "x-botanu-use-case": "multi-uc",
                 "x-botanu-workflow": "multi-wf",
                 "x-botanu-customer-id": "cust-multi",
             },
         )
         assert resp.headers["x-botanu-run-id"] == "multi-001"
-        assert resp.headers["x-botanu-use-case"] == "multi-uc"
         assert resp.headers["x-botanu-workflow"] == "multi-wf"
 
     def test_exception_in_handler_still_detaches_context(self, memory_exporter):
@@ -160,7 +142,7 @@ def _make_baggage_check_app():
         return JSONResponse({"run_id": run_id})
 
     app = Starlette(routes=[Route("/check", check_baggage)])
-    app.add_middleware(BotanuMiddleware, use_case="test")
+    app.add_middleware(BotanuMiddleware, workflow="test")
     return app
 
 
@@ -171,5 +153,5 @@ def _make_error_app():
         raise RuntimeError("Intentional test error")
 
     app = Starlette(routes=[Route("/error", error_handler)])
-    app.add_middleware(BotanuMiddleware, use_case="error_test")
+    app.add_middleware(BotanuMiddleware, workflow="error_test")
     return app

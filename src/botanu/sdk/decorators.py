@@ -3,7 +3,7 @@
 
 """Decorators for automatic run span creation and context propagation.
 
-The ``@botanu_use_case`` decorator is the primary integration point.
+The ``@botanu_workflow`` decorator is the primary integration point.
 It creates a "run span" that:
 - Generates a UUIDv7 run_id
 - Emits ``run.started`` and ``run.completed`` events
@@ -13,12 +13,14 @@ It creates a "run span" that:
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import hashlib
 import inspect
 from collections.abc import Mapping
+from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, Optional, TypeVar, Union
+from typing import Any, Callable, Dict, Generator, Optional, TypeVar, Union
 
 from opentelemetry import baggage as otel_baggage
 from opentelemetry import trace
@@ -46,10 +48,11 @@ def _get_parent_run_id() -> Optional[str]:
     return get_baggage("botanu.run_id")
 
 
-def botanu_use_case(
+def botanu_workflow(
     name: str,
-    workflow: Optional[str] = None,
     *,
+    event_id: Union[str, Callable[..., str]],
+    customer_id: Union[str, Callable[..., str]],
     environment: Optional[str] = None,
     tenant_id: Optional[str] = None,
     auto_outcome_on_success: bool = True,
@@ -66,33 +69,53 @@ def botanu_use_case(
     5. On completion: emits ``run.completed`` event with outcome
 
     Args:
-        name: Use case name (low cardinality, e.g. ``"Customer Support"``).
-        workflow: Workflow name (defaults to function qualified name).
+        name: Workflow name (low cardinality, e.g. ``"Customer Support"``).
+        event_id: Business unit of work (e.g. ticket ID). Required.
+            Can be a static string or a callable that receives the same
+            ``(*args, **kwargs)`` as the decorated function and returns a string.
+        customer_id: End-customer being served (e.g. org ID). Required.
+            Can be a static string or a callable (same signature as *event_id*).
         environment: Deployment environment.
         tenant_id: Tenant identifier for multi-tenant apps.
         auto_outcome_on_success: Emit ``"success"`` if no exception.
         span_kind: OpenTelemetry span kind (default: ``SERVER``).
 
-    Example::
+    Examples::
 
-        @botanu_use_case("Customer Support")
-        async def handle_ticket(ticket_id: str):
-            result = await process_ticket(ticket_id)
-            emit_outcome("success", value_type="tickets_resolved", value_amount=1)
-            return result
+        # Static values (known at decoration time):
+        @botanu_workflow("Support", event_id="ticket-123", customer_id="acme-corp")
+        async def handle_ticket(): ...
+
+        # Dynamic values (extracted from function arguments at call time):
+        @botanu_workflow(
+            "Support",
+            event_id=lambda request: request.workflow_id,
+            customer_id=lambda request: request.customer_id,
+        )
+        async def handle_ticket(request: TicketRequest): ...
     """
+    if isinstance(event_id, str) and not event_id:
+        raise ValueError("event_id is required and must be a non-empty string")
+    if isinstance(customer_id, str) and not customer_id:
+        raise ValueError("customer_id is required and must be a non-empty string")
+    if not callable(event_id) and not isinstance(event_id, str):
+        raise ValueError("event_id must be a non-empty string or a callable")
+    if not callable(customer_id) and not isinstance(customer_id, str):
+        raise ValueError("customer_id must be a non-empty string or a callable")
 
     def decorator(func: Callable[..., T]) -> Callable[..., T]:
-        workflow_name = workflow or func.__qualname__
         workflow_version = _compute_workflow_version(func)
         is_async = inspect.iscoroutinefunction(func)
 
         @functools.wraps(func)
         async def async_wrapper(*args: Any, **kwargs: Any) -> T:
+            resolved_event_id = event_id(*args, **kwargs) if callable(event_id) else event_id
+            resolved_customer_id = customer_id(*args, **kwargs) if callable(customer_id) else customer_id
             parent_run_id = _get_parent_run_id()
             run_ctx = RunContext.create(
-                use_case=name,
-                workflow=workflow_name,
+                workflow=name,
+                event_id=resolved_event_id,
+                customer_id=resolved_customer_id,
                 workflow_version=workflow_version,
                 environment=environment,
                 tenant_id=tenant_id,
@@ -110,8 +133,7 @@ def botanu_use_case(
                     "botanu.run.started",
                     attributes={
                         "run_id": run_ctx.run_id,
-                        "use_case": run_ctx.use_case,
-                        "workflow": workflow_name,
+                        "workflow": run_ctx.workflow,
                     },
                 )
 
@@ -151,10 +173,13 @@ def botanu_use_case(
 
         @functools.wraps(func)
         def sync_wrapper(*args: Any, **kwargs: Any) -> T:
+            resolved_event_id = event_id(*args, **kwargs) if callable(event_id) else event_id
+            resolved_customer_id = customer_id(*args, **kwargs) if callable(customer_id) else customer_id
             parent_run_id = _get_parent_run_id()
             run_ctx = RunContext.create(
-                use_case=name,
-                workflow=workflow_name,
+                workflow=name,
+                event_id=resolved_event_id,
+                customer_id=resolved_customer_id,
                 workflow_version=workflow_version,
                 environment=environment,
                 tenant_id=tenant_id,
@@ -172,8 +197,7 @@ def botanu_use_case(
                     "botanu.run.started",
                     attributes={
                         "run_id": run_ctx.run_id,
-                        "use_case": run_ctx.use_case,
-                        "workflow": workflow_name,
+                        "workflow": run_ctx.workflow,
                     },
                 )
 
@@ -228,7 +252,7 @@ def _emit_run_completed(
 
     event_attrs: Dict[str, Union[str, float]] = {
         "run_id": run_ctx.run_id,
-        "use_case": run_ctx.use_case,
+        "workflow": run_ctx.workflow,
         "status": status.value,
         "duration_ms": duration_ms,
     }
@@ -245,7 +269,7 @@ def _emit_run_completed(
     span.set_attribute("botanu.run.duration_ms", duration_ms)
 
 
-use_case = botanu_use_case
+workflow = botanu_workflow
 
 
 def botanu_outcome(
@@ -255,8 +279,8 @@ def botanu_outcome(
 ) -> Callable[[Callable[..., T]], Callable[..., T]]:
     """Decorator to automatically emit outcomes based on function result.
 
-    This is a convenience decorator for sub-functions within a use case.
-    It does NOT create a new run — use ``@botanu_use_case`` for that.
+    This is a convenience decorator for sub-functions within a workflow.
+    It does NOT create a new run — use ``@botanu_workflow`` for that.
     """
     from botanu.sdk.span_helpers import emit_outcome
 
@@ -292,3 +316,92 @@ def botanu_outcome(
         return sync_wrapper  # type: ignore[return-value]
 
     return decorator
+
+
+@contextmanager
+def run_botanu(
+    name: str,
+    *,
+    event_id: str,
+    customer_id: str,
+    environment: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+    auto_outcome_on_success: bool = True,
+    span_kind: SpanKind = SpanKind.SERVER,
+) -> Generator[RunContext, None, None]:
+    """Context manager to create a run span — non-decorator alternative to ``@botanu_workflow``.
+
+    Use this when you can't decorate a function (dynamic workflows, simple scripts,
+    or when the workflow name is determined at runtime).
+
+    Args:
+        name: Workflow name (low cardinality, e.g. ``"Customer Support"``).
+        event_id: Business unit of work (e.g. ticket ID).
+        customer_id: End-customer being served (e.g. org ID).
+        environment: Deployment environment.
+        tenant_id: Tenant identifier for multi-tenant apps.
+        auto_outcome_on_success: Emit ``"success"`` if no exception.
+        span_kind: OpenTelemetry span kind (default: ``SERVER``).
+
+    Yields:
+        RunContext with the generated run_id and metadata.
+
+    Example::
+
+        with run_botanu("Support", event_id="ticket-42", customer_id="acme") as run:
+            result = call_llm(...)
+            emit_outcome("success", value_type="tickets_resolved", value_amount=1)
+    """
+    parent_run_id = _get_parent_run_id()
+    run_ctx = RunContext.create(
+        workflow=name,
+        event_id=event_id,
+        customer_id=customer_id,
+        environment=environment,
+        tenant_id=tenant_id,
+        parent_run_id=parent_run_id,
+    )
+
+    with tracer.start_as_current_span(
+        name=f"botanu.run/{name}",
+        kind=span_kind,
+    ) as span:
+        for key, value in run_ctx.to_span_attributes().items():
+            span.set_attribute(key, value)
+
+        span.add_event(
+            "botanu.run.started",
+            attributes={"run_id": run_ctx.run_id, "workflow": run_ctx.workflow},
+        )
+
+        ctx = get_current()
+        for key, value in run_ctx.to_baggage_dict().items():
+            ctx = otel_baggage.set_baggage(key, value, context=ctx)
+        baggage_token = attach(ctx)
+
+        try:
+            yield run_ctx
+
+            span_attrs = getattr(span, "attributes", None)
+            existing_outcome = (
+                span_attrs.get("botanu.outcome.status")
+                if isinstance(span_attrs, Mapping)
+                else None
+            )
+
+            if existing_outcome is None and auto_outcome_on_success:
+                run_ctx.complete(RunStatus.SUCCESS)
+
+            span.set_status(Status(StatusCode.OK))
+            _emit_run_completed(span, run_ctx, RunStatus.SUCCESS)
+
+        except Exception as exc:
+            span.set_status(Status(StatusCode.ERROR, str(exc)))
+            span.record_exception(exc)
+            run_ctx.complete(RunStatus.FAILURE, error_class=exc.__class__.__name__)
+            _emit_run_completed(
+                span, run_ctx, RunStatus.FAILURE, error_class=exc.__class__.__name__,
+            )
+            raise
+        finally:
+            detach(baggage_token)

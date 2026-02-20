@@ -68,11 +68,6 @@ def get_run_id() -> Optional[str]:
     return get_baggage("botanu.run_id")
 
 
-def get_use_case() -> Optional[str]:
-    """Get the current ``use_case`` from baggage."""
-    return get_baggage("botanu.use_case")
-
-
 def get_workflow() -> Optional[str]:
     """Get the current ``workflow`` from baggage."""
     return get_baggage("botanu.workflow")

@@ -129,7 +129,7 @@ def enable(
         try:
             from botanu._version import __version__
             from botanu.processors import RunContextEnricher
-            from botanu.resources.detector import detect_all_resources
+            from botanu.resources import detect_resource_attrs
 
             resource_attrs = {
                 "service.name": cfg.service_name,
@@ -143,7 +143,7 @@ def enable(
                 resource_attrs["service.namespace"] = cfg.service_namespace
 
             if cfg.auto_detect_resources:
-                detected = detect_all_resources()
+                detected = detect_resource_attrs()
                 for key, value in detected.items():
                     if key not in resource_attrs:
                         resource_attrs[key] = value
@@ -152,13 +152,8 @@ def enable(
 
             resource = Resource.create(resource_attrs)
 
-            existing = trace.get_tracer_provider()
-            if isinstance(existing, TracerProvider):
-                provider = existing
-                logger.info("Reusing existing TracerProvider — adding Botanu processors")
-            else:
-                provider = TracerProvider(resource=resource, sampler=ALWAYS_ON)
-                trace.set_tracer_provider(provider)
+            provider = TracerProvider(resource=resource, sampler=ALWAYS_ON)
+            trace.set_tracer_provider(provider)
 
             lean_mode = cfg.propagation_mode == "lean"
             provider.add_span_processor(RunContextEnricher(lean_mode=lean_mode))
@@ -187,6 +182,25 @@ def enable(
             )
 
             logger.info("Botanu SDK tracing initialized")
+
+            # Set up LoggerProvider for outcome event emission
+            try:
+                from opentelemetry._logs import set_logger_provider
+                from opentelemetry.sdk._logs import LoggerProvider as _LoggerProvider
+                from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
+                from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
+
+                logs_endpoint = cfg.otlp_endpoint
+                if logs_endpoint and not logs_endpoint.endswith("/v1/logs"):
+                    logs_endpoint = f"{logs_endpoint.rstrip('/')}/v1/logs"
+
+                log_provider = _LoggerProvider(resource=resource)
+                log_exporter = OTLPLogExporter(endpoint=logs_endpoint, headers=cfg.otlp_headers or {})
+                log_provider.add_log_record_processor(BatchLogRecordProcessor(log_exporter))
+                set_logger_provider(log_provider)
+                logger.info("Botanu SDK log provider initialized")
+            except ImportError:
+                logger.debug("OTel log exporter not available; outcome log emission disabled")
 
             if auto_instrumentation:
                 _enable_auto_instrumentation()
@@ -372,6 +386,16 @@ def disable() -> None:
                 provider.force_flush(timeout_millis=5000)
             if hasattr(provider, "shutdown"):
                 provider.shutdown()
+
+            # Flush LoggerProvider (don't shutdown — it may be shared/external)
+            try:
+                from opentelemetry._logs import get_logger_provider
+
+                log_provider = get_logger_provider()
+                if hasattr(log_provider, "force_flush"):
+                    log_provider.force_flush(timeout_millis=5000)
+            except Exception:
+                pass
 
             _initialized = False
             _current_config = None

@@ -30,19 +30,20 @@ class RunContextEnricher(SpanProcessor):
     """Enriches ALL spans with run context from baggage.
 
     This ensures that every span (including auto-instrumented ones)
-    gets ``botanu.run_id``, ``botanu.use_case``, etc. attributes.
+    gets ``botanu.run_id``, ``botanu.workflow``, etc. attributes.
 
     Without this processor, only the root ``botanu.run`` span would
     have these attributes.
 
-    In ``lean_mode`` (default), only ``run_id`` and ``use_case`` are
+    In ``lean_mode`` (default), only ``run_id`` and ``workflow`` are
     propagated to minimise per-span overhead.
     """
 
     BAGGAGE_KEYS_FULL: ClassVar[List[str]] = [
         "botanu.run_id",
-        "botanu.use_case",
         "botanu.workflow",
+        "botanu.event_id",
+        "botanu.customer_id",
         "botanu.environment",
         "botanu.tenant_id",
         "botanu.parent_run_id",
@@ -50,7 +51,9 @@ class RunContextEnricher(SpanProcessor):
 
     BAGGAGE_KEYS_LEAN: ClassVar[List[str]] = [
         "botanu.run_id",
-        "botanu.use_case",
+        "botanu.workflow",
+        "botanu.event_id",
+        "botanu.customer_id",
     ]
 
     def __init__(self, lean_mode: bool = True) -> None:
