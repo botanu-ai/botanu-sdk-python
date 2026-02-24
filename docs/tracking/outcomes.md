@@ -268,7 +268,7 @@ Outcomes are recorded as span attributes:
 
 | Attribute | Description |
 |-----------|-------------|
-| `botanu.outcome` | Status (success/partial/failed/timeout/canceled/abandoned) |
+| `botanu.outcome.status` | Status (success/partial/failed/timeout/canceled/abandoned) |
 | `botanu.outcome.value_type` | What was achieved |
 | `botanu.outcome.value_amount` | Quantified value |
 | `botanu.outcome.confidence` | Confidence score |
