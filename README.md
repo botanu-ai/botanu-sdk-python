@@ -5,13 +5,14 @@
 [botanu](https://botanu.ai/) is platform that helps AI companies understand the real cost of their AI features per customer, enabling outcome-based pricing and smarter scaling.
 This SDK is built on [OpenTelemetry](https://opentelemetry.io/) for event-level cost attribution for AI workflow. For more email- deborah@botanu.ai
 
+
+## Getting Started
+
 An **event** is one business transaction — resolving a support ticket, processing
 an order, generating a report. Each event may involve multiple **runs** (LLM calls,
 retries, sub-workflows) across multiple services. By correlating every run to a
-stable `event_id`, Botanu gives you per-event cost attribution and outcome
+stable `event_id`, botanu gives you per-event cost attribution and outcome
 tracking without sampling artifacts.
-
-## Getting Started
 
 ```bash
 pip install botanu
