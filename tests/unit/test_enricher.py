@@ -35,7 +35,9 @@ class TestRunContextEnricher:
         # Set up baggage context - start from a clean context
         ctx = context.Context()
         ctx = baggage.set_baggage("botanu.run_id", "test-run-123", context=ctx)
-        ctx = baggage.set_baggage("botanu.use_case", "Test Case", context=ctx)
+        ctx = baggage.set_baggage("botanu.workflow", "Test Case", context=ctx)
+        ctx = baggage.set_baggage("botanu.event_id", "evt-42", context=ctx)
+        ctx = baggage.set_baggage("botanu.customer_id", "cust-abc", context=ctx)
 
         # Create a span with the baggage context
         tracer = trace.get_tracer("test")
@@ -51,7 +53,9 @@ class TestRunContextEnricher:
         assert len(spans) == 1
         attrs = dict(spans[0].attributes)
         assert attrs.get("botanu.run_id") == "test-run-123"
-        assert attrs.get("botanu.use_case") == "Test Case"
+        assert attrs.get("botanu.workflow") == "Test Case"
+        assert attrs.get("botanu.event_id") == "evt-42"
+        assert attrs.get("botanu.customer_id") == "cust-abc"
 
     def test_on_start_full_mode(self, memory_exporter):
         """Full mode should read all baggage keys."""
@@ -60,8 +64,9 @@ class TestRunContextEnricher:
         # Set up baggage context with all keys - start from a clean context
         ctx = context.Context()
         ctx = baggage.set_baggage("botanu.run_id", "run-456", context=ctx)
-        ctx = baggage.set_baggage("botanu.use_case", "Full Test", context=ctx)
-        ctx = baggage.set_baggage("botanu.workflow", "my_workflow", context=ctx)
+        ctx = baggage.set_baggage("botanu.workflow", "Full Test", context=ctx)
+        ctx = baggage.set_baggage("botanu.event_id", "evt-789", context=ctx)
+        ctx = baggage.set_baggage("botanu.customer_id", "cust-xyz", context=ctx)
         ctx = baggage.set_baggage("botanu.environment", "staging", context=ctx)
         ctx = baggage.set_baggage("botanu.tenant_id", "tenant-789", context=ctx)
 
@@ -76,8 +81,9 @@ class TestRunContextEnricher:
         spans = memory_exporter.get_finished_spans()
         attrs = dict(spans[0].attributes)
         assert attrs.get("botanu.run_id") == "run-456"
-        assert attrs.get("botanu.use_case") == "Full Test"
-        assert attrs.get("botanu.workflow") == "my_workflow"
+        assert attrs.get("botanu.workflow") == "Full Test"
+        assert attrs.get("botanu.event_id") == "evt-789"
+        assert attrs.get("botanu.customer_id") == "cust-xyz"
         assert attrs.get("botanu.environment") == "staging"
         assert attrs.get("botanu.tenant_id") == "tenant-789"
 
@@ -109,7 +115,9 @@ class TestRunContextEnricher:
         # Set up baggage context
         ctx = context.Context()
         ctx = baggage.set_baggage("botanu.run_id", "baggage-id", context=ctx)
-        ctx = baggage.set_baggage("botanu.use_case", "Baggage Case", context=ctx)
+        ctx = baggage.set_baggage("botanu.workflow", "Baggage Case", context=ctx)
+        ctx = baggage.set_baggage("botanu.event_id", "baggage-evt", context=ctx)
+        ctx = baggage.set_baggage("botanu.customer_id", "baggage-cust", context=ctx)
 
         tracer = trace.get_tracer("test")
         token = context.attach(ctx)
@@ -126,8 +134,11 @@ class TestRunContextEnricher:
         attrs = dict(spans[0].attributes)
         # Should keep existing value
         assert attrs.get("botanu.run_id") == "existing-id"
-        # But should set use_case since it wasn't set before
-        assert attrs.get("botanu.use_case") == "Baggage Case"
+        # But should set workflow since it wasn't set before
+        assert attrs.get("botanu.workflow") == "Baggage Case"
+        # Should set event_id and customer_id since they weren't set before
+        assert attrs.get("botanu.event_id") == "baggage-evt"
+        assert attrs.get("botanu.customer_id") == "baggage-cust"
 
     def test_on_end_noop(self):
         """on_end should be a no-op."""
@@ -151,10 +162,14 @@ class TestRunContextEnricher:
     def test_baggage_keys_constants(self):
         """Verify baggage key constants."""
         assert "botanu.run_id" in RunContextEnricher.BAGGAGE_KEYS_LEAN
-        assert "botanu.use_case" in RunContextEnricher.BAGGAGE_KEYS_LEAN
-        assert len(RunContextEnricher.BAGGAGE_KEYS_LEAN) == 2
+        assert "botanu.workflow" in RunContextEnricher.BAGGAGE_KEYS_LEAN
+        assert "botanu.event_id" in RunContextEnricher.BAGGAGE_KEYS_LEAN
+        assert "botanu.customer_id" in RunContextEnricher.BAGGAGE_KEYS_LEAN
+        assert len(RunContextEnricher.BAGGAGE_KEYS_LEAN) == 4
 
         assert "botanu.run_id" in RunContextEnricher.BAGGAGE_KEYS_FULL
+        assert "botanu.event_id" in RunContextEnricher.BAGGAGE_KEYS_FULL
+        assert "botanu.customer_id" in RunContextEnricher.BAGGAGE_KEYS_FULL
         assert "botanu.workflow" in RunContextEnricher.BAGGAGE_KEYS_FULL
         assert "botanu.environment" in RunContextEnricher.BAGGAGE_KEYS_FULL
-        assert len(RunContextEnricher.BAGGAGE_KEYS_FULL) == 6
+        assert len(RunContextEnricher.BAGGAGE_KEYS_FULL) == 7

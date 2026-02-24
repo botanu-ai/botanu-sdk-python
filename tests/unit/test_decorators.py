@@ -10,7 +10,7 @@ from opentelemetry import baggage, trace
 from opentelemetry import context as otel_context
 from opentelemetry.context import get_current
 
-from botanu.sdk.decorators import botanu_outcome, botanu_use_case
+from botanu.sdk.decorators import botanu_outcome, botanu_workflow
 
 
 @pytest.fixture(autouse=True)
@@ -21,11 +21,11 @@ def _clean_otel_context():
     otel_context.detach(token)
 
 
-class TestBotanuUseCaseDecorator:
-    """Tests for @botanu_use_case decorator."""
+class TestBotanuWorkflowDecorator:
+    """Tests for @botanu_workflow decorator."""
 
     def test_sync_function_creates_span(self, memory_exporter):
-        @botanu_use_case("Test Use Case")
+        @botanu_workflow("Test Workflow", event_id="evt-1", customer_id="cust-1")
         def my_function():
             return "result"
 
@@ -34,10 +34,10 @@ class TestBotanuUseCaseDecorator:
         assert result == "result"
         spans = memory_exporter.get_finished_spans()
         assert len(spans) == 1
-        assert spans[0].name == "botanu.run/Test Use Case"
+        assert spans[0].name == "botanu.run/Test Workflow"
 
     def test_span_has_run_attributes(self, memory_exporter):
-        @botanu_use_case("Customer Support", workflow="handle_ticket")
+        @botanu_workflow("Customer Support", event_id="ticket-42", customer_id="bigretail")
         def my_function():
             return "done"
 
@@ -47,11 +47,12 @@ class TestBotanuUseCaseDecorator:
         attrs = dict(spans[0].attributes)
 
         assert "botanu.run_id" in attrs
-        assert attrs["botanu.use_case"] == "Customer Support"
-        assert attrs["botanu.workflow"] == "handle_ticket"
+        assert attrs["botanu.workflow"] == "Customer Support"
+        assert attrs["botanu.event_id"] == "ticket-42"
+        assert attrs["botanu.customer_id"] == "bigretail"
 
     def test_emits_started_event(self, memory_exporter):
-        @botanu_use_case("Test")
+        @botanu_workflow("Test", event_id="evt-1", customer_id="cust-1")
         def my_function():
             pass
 
@@ -64,7 +65,7 @@ class TestBotanuUseCaseDecorator:
         assert len(started_events) == 1
 
     def test_emits_completed_event(self, memory_exporter):
-        @botanu_use_case("Test")
+        @botanu_workflow("Test", event_id="evt-1", customer_id="cust-1")
         def my_function():
             return "done"
 
@@ -78,7 +79,7 @@ class TestBotanuUseCaseDecorator:
         assert completed_events[0].attributes["status"] == "success"
 
     def test_records_exception_on_failure(self, memory_exporter):
-        @botanu_use_case("Test")
+        @botanu_workflow("Test", event_id="evt-1", customer_id="cust-1")
         def failing_function():
             raise ValueError("test error")
 
@@ -96,7 +97,7 @@ class TestBotanuUseCaseDecorator:
 
     @pytest.mark.asyncio
     async def test_async_function_creates_span(self, memory_exporter):
-        @botanu_use_case("Async Test")
+        @botanu_workflow("Async Test", event_id="evt-1", customer_id="cust-1")
         async def async_function():
             return "async result"
 
@@ -109,7 +110,7 @@ class TestBotanuUseCaseDecorator:
 
     @pytest.mark.asyncio
     async def test_async_exception_handling(self, memory_exporter):
-        @botanu_use_case("Async Test")
+        @botanu_workflow("Async Test", event_id="evt-1", customer_id="cust-1")
         async def failing_async():
             raise RuntimeError("async error")
 
@@ -122,7 +123,7 @@ class TestBotanuUseCaseDecorator:
         assert completed_events[0].attributes["status"] == "failure"
 
     def test_workflow_version_computed(self, memory_exporter):
-        @botanu_use_case("Test")
+        @botanu_workflow("Test", event_id="evt-1", customer_id="cust-1")
         def versioned_function():
             return "versioned"
 
@@ -135,7 +136,7 @@ class TestBotanuUseCaseDecorator:
         assert attrs["botanu.workflow.version"].startswith("v:")
 
     def test_return_value_preserved(self, memory_exporter):
-        @botanu_use_case("Test")
+        @botanu_workflow("Test", event_id="evt-1", customer_id="cust-1")
         def returns_dict():
             return {"key": "value", "count": 42}
 
@@ -144,7 +145,7 @@ class TestBotanuUseCaseDecorator:
 
     @pytest.mark.asyncio
     async def test_async_return_value_preserved(self, memory_exporter):
-        @botanu_use_case("Test")
+        @botanu_workflow("Test", event_id="evt-1", customer_id="cust-1")
         async def returns_data():
             return [1, 2, 3]
 
@@ -152,7 +153,7 @@ class TestBotanuUseCaseDecorator:
         assert result == [1, 2, 3]
 
     def test_exception_re_raised(self, memory_exporter):
-        @botanu_use_case("Test")
+        @botanu_workflow("Test", event_id="evt-1", customer_id="cust-1")
         def raises():
             raise TypeError("bad type")
 
@@ -160,7 +161,7 @@ class TestBotanuUseCaseDecorator:
             raises()
 
     def test_outcome_status_set_on_success(self, memory_exporter):
-        @botanu_use_case("Test")
+        @botanu_workflow("Test", event_id="evt-1", customer_id="cust-1")
         def my_fn():
             return "ok"
 
@@ -170,7 +171,7 @@ class TestBotanuUseCaseDecorator:
         assert attrs["botanu.outcome.status"] == "success"
 
     def test_outcome_status_set_on_failure(self, memory_exporter):
-        @botanu_use_case("Test")
+        @botanu_workflow("Test", event_id="evt-1", customer_id="cust-1")
         def failing():
             raise RuntimeError("boom")
 
@@ -182,7 +183,7 @@ class TestBotanuUseCaseDecorator:
         assert attrs["botanu.outcome.status"] == "failure"
 
     def test_duration_ms_recorded(self, memory_exporter):
-        @botanu_use_case("Test")
+        @botanu_workflow("Test", event_id="evt-1", customer_id="cust-1")
         def quick_fn():
             return "done"
 
@@ -195,7 +196,7 @@ class TestBotanuUseCaseDecorator:
     def test_custom_span_kind(self, memory_exporter):
         from opentelemetry.trace import SpanKind
 
-        @botanu_use_case("Test", span_kind=SpanKind.CLIENT)
+        @botanu_workflow("Test", event_id="evt-1", customer_id="cust-1", span_kind=SpanKind.CLIENT)
         def client_fn():
             return "ok"
 
@@ -204,7 +205,7 @@ class TestBotanuUseCaseDecorator:
         assert spans[0].kind == SpanKind.CLIENT
 
     def test_root_run_id_equals_run_id_for_root(self, memory_exporter):
-        @botanu_use_case("Test")
+        @botanu_workflow("Test", event_id="evt-1", customer_id="cust-1")
         def root_fn():
             return "root"
 
@@ -215,7 +216,7 @@ class TestBotanuUseCaseDecorator:
         assert attrs["botanu.root_run_id"] == attrs["botanu.run_id"]
 
     def test_tenant_id_propagated(self, memory_exporter):
-        @botanu_use_case("Test", tenant_id="tenant-abc")
+        @botanu_workflow("Test", event_id="evt-1", customer_id="cust-1", tenant_id="tenant-abc")
         def tenant_fn():
             return "ok"
 
@@ -227,7 +228,7 @@ class TestBotanuUseCaseDecorator:
     def test_baggage_cleaned_up_after_sync(self, memory_exporter):
         """Verify baggage does NOT leak after the decorated function completes."""
 
-        @botanu_use_case("Leak Test")
+        @botanu_workflow("Leak Test", event_id="evt-1", customer_id="cust-1")
         def my_fn():
             # Inside the function, baggage should be set
             assert baggage.get_baggage("botanu.run_id", get_current()) is not None
@@ -245,7 +246,7 @@ class TestBotanuUseCaseDecorator:
     async def test_baggage_cleaned_up_after_async(self, memory_exporter):
         """Verify baggage does NOT leak after an async decorated function."""
 
-        @botanu_use_case("Async Leak Test")
+        @botanu_workflow("Async Leak Test", event_id="evt-1", customer_id="cust-1")
         async def my_fn():
             assert baggage.get_baggage("botanu.run_id", get_current()) is not None
             return "ok"
@@ -259,7 +260,7 @@ class TestBotanuUseCaseDecorator:
     def test_baggage_cleaned_up_after_exception(self, memory_exporter):
         """Verify baggage is cleaned up even when the function raises."""
 
-        @botanu_use_case("Exception Leak Test")
+        @botanu_workflow("Exception Leak Test", event_id="evt-1", customer_id="cust-1")
         def failing_fn():
             raise RuntimeError("boom")
 
@@ -270,6 +271,31 @@ class TestBotanuUseCaseDecorator:
 
         # Must be cleaned up despite the exception
         assert baggage.get_baggage("botanu.run_id", get_current()) is None
+
+    def test_event_id_required(self):
+        """Should raise ValueError if event_id is missing."""
+        with pytest.raises(ValueError, match="event_id is required"):
+            @botanu_workflow("Test", event_id="", customer_id="cust-1")
+            def my_fn():
+                pass
+
+    def test_customer_id_required(self):
+        """Should raise ValueError if customer_id is missing."""
+        with pytest.raises(ValueError, match="customer_id is required"):
+            @botanu_workflow("Test", event_id="evt-1", customer_id="")
+            def my_fn():
+                pass
+
+    def test_event_id_and_customer_id_in_baggage(self, memory_exporter):
+        """Verify event_id and customer_id are propagated via baggage."""
+
+        @botanu_workflow("Baggage Test", event_id="ticket-99", customer_id="acme-corp")
+        def my_fn():
+            assert baggage.get_baggage("botanu.event_id", get_current()) == "ticket-99"
+            assert baggage.get_baggage("botanu.customer_id", get_current()) == "acme-corp"
+            return "ok"
+
+        my_fn()
 
 
 class TestBotanuOutcomeDecorator:

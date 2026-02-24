@@ -11,17 +11,16 @@ from botanu.sdk.context import (
     get_baggage,
     get_current_span,
     get_run_id,
-    get_use_case,
     get_workflow,
     set_baggage,
 )
-from botanu.sdk.decorators import botanu_outcome, botanu_use_case, use_case
+from botanu.sdk.decorators import botanu_outcome, botanu_workflow, run_botanu, workflow
 from botanu.sdk.span_helpers import emit_outcome, set_business_context
 
 __all__ = [
     "BotanuConfig",
     "botanu_outcome",
-    "botanu_use_case",
+    "botanu_workflow",
     "disable",
     "emit_outcome",
     "enable",
@@ -29,10 +28,10 @@ __all__ = [
     "get_config",
     "get_current_span",
     "get_run_id",
-    "get_use_case",
     "get_workflow",
     "is_enabled",
+    "run_botanu",
     "set_baggage",
     "set_business_context",
-    "use_case",
+    "workflow",
 ]

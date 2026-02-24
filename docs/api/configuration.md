@@ -12,18 +12,19 @@ from botanu.sdk.config import BotanuConfig
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `service_name` | `str` | `"unknown_service"` | Service name (from `OTEL_SERVICE_NAME`) |
-| `service_version` | `str` | `None` | Service version (from `OTEL_SERVICE_VERSION`) |
-| `service_namespace` | `str` | `None` | Service namespace (from `OTEL_SERVICE_NAMESPACE`) |
-| `deployment_environment` | `str` | `"production"` | Environment (from `OTEL_DEPLOYMENT_ENVIRONMENT` or `BOTANU_ENVIRONMENT`) |
+| `service_name` | `str` | From env / `"unknown_service"` | Service name |
+| `service_version` | `str` | From env | Service version |
+| `service_namespace` | `str` | From env | Service namespace |
+| `deployment_environment` | `str` | From env / `"production"` | Deployment environment |
 | `auto_detect_resources` | `bool` | `True` | Auto-detect cloud resources |
-| `otlp_endpoint` | `str` | `"http://localhost:4318/v1/traces"` | OTLP endpoint |
+| `otlp_endpoint` | `str` | From env / `"http://localhost:4318"` | OTLP endpoint |
 | `otlp_headers` | `dict` | `None` | Custom headers for OTLP exporter |
 | `max_export_batch_size` | `int` | `512` | Max spans per batch |
-| `max_queue_size` | `int` | `2048` | Max spans in queue |
+| `max_queue_size` | `int` | `65536` | Max spans in queue (~64 MB at ~1 KB/span) |
 | `schedule_delay_millis` | `int` | `5000` | Delay between batch exports |
+| `export_timeout_millis` | `int` | `30000` | Timeout for export operations |
 | `propagation_mode` | `str` | `"lean"` | `"lean"` or `"full"` |
-| `auto_instrument_packages` | `list` | `[...]` | Packages to auto-instrument |
+| `auto_instrument_packages` | `list` | See below | Packages to auto-instrument |
 
 ### Constructor
 
@@ -31,7 +32,7 @@ from botanu.sdk.config import BotanuConfig
 config = BotanuConfig(
     service_name="my-service",
     deployment_environment="production",
-    otlp_endpoint="http://collector:4318/v1/traces",
+    otlp_endpoint="http://collector:4318",
 )
 ```
 
@@ -50,7 +51,7 @@ def from_yaml(cls, path: Optional[str] = None) -> BotanuConfig
 - `path`: Path to YAML config file
 
 **Raises:**
-- `FileNotFoundError`: If config file doesn't exist
+- `FileNotFoundError`: If config file does not exist
 - `ValueError`: If YAML is malformed
 - `ImportError`: If PyYAML is not installed
 
@@ -62,7 +63,7 @@ config = BotanuConfig.from_yaml("config/botanu.yaml")
 
 #### from_file_or_env()
 
-Load config from file if exists, otherwise use environment variables.
+Load config from file if it exists, otherwise use environment variables.
 
 ```python
 @classmethod
@@ -135,6 +136,7 @@ export:
   batch_size: integer       # Max spans per batch
   queue_size: integer       # Max spans in queue
   delay_ms: integer         # Delay between exports
+  export_timeout_ms: integer # Export timeout
 
 propagation:
   mode: string              # "lean" or "full"
@@ -151,7 +153,7 @@ service:
   environment: ${ENVIRONMENT}
 
 otlp:
-  endpoint: ${COLLECTOR_URL:-http://localhost:4318}/v1/traces
+  endpoint: ${COLLECTOR_URL:-http://localhost:4318}
   headers:
     Authorization: Bearer ${API_TOKEN}
 ```
@@ -164,7 +166,7 @@ Syntax:
 
 ## enable()
 
-Bootstrap function to initialize the SDK.
+Bootstrap function to initialise the SDK.
 
 ```python
 from botanu import enable
@@ -172,12 +174,13 @@ from botanu import enable
 enable(
     service_name: Optional[str] = None,
     otlp_endpoint: Optional[str] = None,
+    environment: Optional[str] = None,
+    auto_instrumentation: bool = True,
+    propagators: Optional[List[str]] = None,
+    log_level: str = "INFO",
     config: Optional[BotanuConfig] = None,
-    auto_instrument: bool = True,
-    auto_instrument_packages: Optional[List[str]] = None,
-    propagation_mode: Optional[str] = None,
-    **kwargs: Any,
-) -> None
+    config_file: Optional[str] = None,
+) -> bool
 ```
 
 ### Parameters
@@ -186,17 +189,22 @@ enable(
 |-----------|------|---------|-------------|
 | `service_name` | `str` | From env | Service name |
 | `otlp_endpoint` | `str` | From env | OTLP endpoint URL |
-| `config` | `BotanuConfig` | `None` | Pre-built configuration |
-| `auto_instrument` | `bool` | `True` | Enable auto-instrumentation |
-| `auto_instrument_packages` | `list` | `None` | Override default packages |
-| `propagation_mode` | `str` | `None` | `"lean"` or `"full"` |
-| `**kwargs` | `Any` | `{}` | Additional config fields |
+| `environment` | `str` | From env | Deployment environment |
+| `auto_instrumentation` | `bool` | `True` | Enable auto-instrumentation |
+| `propagators` | `list[str]` | `["tracecontext", "baggage"]` | Propagator list |
+| `log_level` | `str` | `"INFO"` | Logging level |
+| `config` | `BotanuConfig` | `None` | Pre-built configuration (overrides individual params) |
+| `config_file` | `str` | `None` | Path to YAML config file |
 
-### Behavior
+### Returns
+
+`True` if successfully initialised, `False` if already initialised.
+
+### Behaviour
 
 1. Creates/merges `BotanuConfig`
 2. Configures `TracerProvider` with `RunContextEnricher`
-3. Sets up OTLP exporter (if SDK extras installed)
+3. Sets up OTLP exporter
 4. Enables auto-instrumentation (if requested)
 5. Configures W3C Baggage propagation
 
@@ -220,15 +228,13 @@ config = BotanuConfig.from_yaml("config/botanu.yaml")
 enable(config=config)
 ```
 
-#### Custom Options
+#### From environment only
 
 ```python
-enable(
-    service_name="my-service",
-    otlp_endpoint="http://collector:4318/v1/traces",
-    auto_instrument_packages=["fastapi", "openai_v2"],
-    propagation_mode="full",
-)
+from botanu import enable
+
+# Reads OTEL_SERVICE_NAME, OTEL_EXPORTER_OTLP_ENDPOINT, etc.
+enable()
 ```
 
 ---
@@ -243,7 +249,7 @@ from botanu import disable
 disable() -> None
 ```
 
-### Behavior
+### Behaviour
 
 1. Flushes pending spans
 2. Shuts down span processors
@@ -292,12 +298,17 @@ if not is_enabled():
 | `BOTANU_PROPAGATION_MODE` | `"lean"` or `"full"` | `"lean"` |
 | `BOTANU_AUTO_DETECT_RESOURCES` | Auto-detect cloud resources | `"true"` |
 | `BOTANU_CONFIG_FILE` | Path to YAML config file | None |
+| `BOTANU_COLLECTOR_ENDPOINT` | Override for OTLP endpoint | None |
+| `BOTANU_MAX_QUEUE_SIZE` | Override max queue size | `65536` |
+| `BOTANU_MAX_EXPORT_BATCH_SIZE` | Override max batch size | `512` |
+| `BOTANU_EXPORT_TIMEOUT_MILLIS` | Override export timeout | `30000` |
 
 ---
 
 ## RunContext
 
-Model for run metadata.
+Model for run metadata. Created automatically by `@botanu_workflow` and
+`run_botanu`.
 
 ```python
 from botanu.models.run_context import RunContext
@@ -313,23 +324,27 @@ Create a new run context.
 @classmethod
 def create(
     cls,
-    use_case: str,
-    workflow: Optional[str] = None,
+    workflow: str,
+    event_id: str,
+    customer_id: str,
     workflow_version: Optional[str] = None,
     environment: Optional[str] = None,
     tenant_id: Optional[str] = None,
     parent_run_id: Optional[str] = None,
+    root_run_id: Optional[str] = None,
+    attempt: int = 1,
+    retry_of_run_id: Optional[str] = None,
     deadline_seconds: Optional[float] = None,
 ) -> RunContext
 ```
 
 #### create_retry()
 
-Create a retry context from an original run.
+Create a retry context from a previous run.
 
 ```python
 @classmethod
-def create_retry(cls, original: RunContext) -> RunContext
+def create_retry(cls, previous: RunContext) -> RunContext
 ```
 
 #### from_baggage()
@@ -345,26 +360,18 @@ def from_baggage(cls, baggage: Dict[str, str]) -> Optional[RunContext]
 
 #### to_baggage_dict()
 
-Serialize to baggage format.
+Serialise to baggage format.
 
 ```python
-def to_baggage_dict(self, lean_mode: bool = True) -> Dict[str, str]
+def to_baggage_dict(self, lean_mode: Optional[bool] = None) -> Dict[str, str]
 ```
 
 #### to_span_attributes()
 
-Serialize to span attributes.
+Serialise to span attributes.
 
 ```python
-def to_span_attributes(self) -> Dict[str, Any]
-```
-
-#### as_current()
-
-Context manager to set this as the current run.
-
-```python
-def as_current(self) -> ContextManager
+def to_span_attributes(self) -> Dict[str, Union[str, float, int, bool]]
 ```
 
 #### complete()
@@ -375,8 +382,36 @@ Mark the run as complete.
 def complete(
     self,
     status: RunStatus,
+    reason_code: Optional[str] = None,
     error_class: Optional[str] = None,
+    value_type: Optional[str] = None,
+    value_amount: Optional[float] = None,
+    confidence: Optional[float] = None,
 ) -> None
+```
+
+#### is_past_deadline()
+
+```python
+def is_past_deadline(self) -> bool
+```
+
+#### is_cancelled()
+
+```python
+def is_cancelled(self) -> bool
+```
+
+#### request_cancellation()
+
+```python
+def request_cancellation(self, reason: str = "user") -> None
+```
+
+#### remaining_time_seconds()
+
+```python
+def remaining_time_seconds(self) -> Optional[float]
 ```
 
 ### Fields
@@ -384,30 +419,36 @@ def complete(
 | Field | Type | Description |
 |-------|------|-------------|
 | `run_id` | `str` | Unique UUIDv7 identifier |
-| `root_run_id` | `str` | Root run ID (same as run_id for first attempt) |
-| `use_case` | `str` | Business use case name |
-| `workflow` | `str` | Workflow/function name |
-| `workflow_version` | `str` | Version hash |
+| `workflow` | `str` | Workflow name |
+| `event_id` | `str` | Business event identifier |
+| `customer_id` | `str` | Customer identifier |
 | `environment` | `str` | Deployment environment |
+| `workflow_version` | `str` | Version hash |
 | `tenant_id` | `str` | Tenant identifier |
 | `parent_run_id` | `str` | Parent run ID |
+| `root_run_id` | `str` | Root run ID (same as `run_id` for first attempt) |
 | `attempt` | `int` | Attempt number |
+| `retry_of_run_id` | `str` | Run ID of the previous attempt |
 | `start_time` | `datetime` | Run start time |
+| `deadline` | `float` | Absolute deadline (epoch seconds) |
+| `cancelled` | `bool` | Whether the run is cancelled |
 | `outcome` | `RunOutcome` | Recorded outcome |
 
 ---
 
 ## RunStatus
 
-Enum for run status.
+Enum for run outcome status.
 
 ```python
 from botanu.models.run_context import RunStatus
 
-class RunStatus(Enum):
+class RunStatus(str, Enum):
     SUCCESS = "success"
     FAILURE = "failure"
     PARTIAL = "partial"
+    TIMEOUT = "timeout"
+    CANCELED = "canceled"
 ```
 
 ## See Also

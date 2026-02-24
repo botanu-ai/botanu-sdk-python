@@ -123,9 +123,22 @@ Changelog = "https://github.com/botanu-ai/botanu-sdk-python/blob/main/CHANGELOG.
 Issues = "https://github.com/botanu-ai/botanu-sdk-python/issues"
 
 # ---------------------------------------------------------------------------
-# Optional extras  (dev only — base install includes everything)
+# Optional extras
 # ---------------------------------------------------------------------------
 [project.optional-dependencies]
+# Cloud resource detectors — lightweight, auto-detect env and no-op elsewhere.
+# K8s: use the OTel Operator or K8s downward API to set OTEL_RESOURCE_ATTRIBUTES.
+# EKS/GKE detection is included in the aws/gcp extras respectively.
+aws = ["opentelemetry-resource-detector-aws >= 0.1b0"]
+gcp = ["opentelemetry-resource-detector-gcp >= 0.1b0"]
+azure = ["opentelemetry-resource-detector-azure >= 0.1b0"]
+container = ["opentelemetry-resource-detector-container >= 0.1b0"]
+cloud = [
+    "opentelemetry-resource-detector-aws >= 0.1b0",
+    "opentelemetry-resource-detector-gcp >= 0.1b0",
+    "opentelemetry-resource-detector-azure >= 0.1b0",
+    "opentelemetry-resource-detector-container >= 0.1b0",
+]
 dev = [
     "pytest >= 7.4.0",
     "pytest-asyncio >= 0.21.0",
@@ -133,7 +146,7 @@ dev = [
     "coverage[toml] >= 7.0",
     "httpx >= 0.24.0, < 0.28.0; python_version < '3.10'",
     "httpx >= 0.24.0; python_version >= '3.10'",
-    "starlette >= 0.27.0, < 0.30.0; python_version < '3.10'",
+    "starlette >= 0.27.0, < 0.30.0; python_version >= '3.10'",
     "starlette >= 0.27.0; python_version >= '3.10'",
     "ruff >= 0.4.0",
     "mypy >= 1.7.0",

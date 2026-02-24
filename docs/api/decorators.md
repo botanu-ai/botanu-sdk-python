@@ -1,17 +1,21 @@
 # Decorators API Reference
 
-## @botanu_use_case
+## @botanu_workflow
 
-The primary decorator for creating runs with automatic context propagation.
+The primary decorator for creating workflow runs with automatic context propagation.
 
 ```python
-from botanu import botanu_use_case
+from botanu import botanu_workflow
 
-@botanu_use_case(
+@botanu_workflow(
     name: str,
-    workflow: Optional[str] = None,
+    *,
+    event_id: Union[str, Callable[..., str]],
+    customer_id: Union[str, Callable[..., str]],
     environment: Optional[str] = None,
     tenant_id: Optional[str] = None,
+    auto_outcome_on_success: bool = True,
+    span_kind: SpanKind = SpanKind.SERVER,
 )
 ```
 
@@ -19,21 +23,33 @@ from botanu import botanu_use_case
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `name` | `str` | Required | Use case name for grouping |
-| `workflow` | `str` | Function name | Workflow identifier |
+| `name` | `str` | Required | Workflow name (low cardinality, e.g. `"Customer Support"`) |
+| `event_id` | `str \| Callable` | Required | Business transaction identifier (e.g. ticket ID). Can be a static string or a callable that receives the same `(*args, **kwargs)` as the decorated function. |
+| `customer_id` | `str \| Callable` | Required | End-customer being served (e.g. org ID). Same static/callable rules as `event_id`. |
 | `environment` | `str` | From env | Deployment environment |
 | `tenant_id` | `str` | `None` | Tenant identifier for multi-tenant systems |
+| `auto_outcome_on_success` | `bool` | `True` | Emit `"success"` outcome if no exception |
+| `span_kind` | `SpanKind` | `SERVER` | OpenTelemetry span kind |
 
 ### Example
 
 ```python
-from botanu import botanu_use_case
+from botanu import botanu_workflow
 
-@botanu_use_case(name="my_workflow")
-def my_function():
-    data = db.query(...)
-    result = llm.complete(...)
+# Static values:
+@botanu_workflow("my-workflow", event_id="evt-001", customer_id="cust-42")
+def do_work():
+    result = do_something()
     return result
+
+# Dynamic values extracted from function arguments:
+@botanu_workflow(
+    "my-workflow",
+    event_id=lambda request: request.event_id,
+    customer_id=lambda request: request.customer_id,
+)
+async def handle_request(request):
+    ...
 ```
 
 ### Span Attributes
@@ -41,59 +57,60 @@ def my_function():
 | Attribute | Description |
 |-----------|-------------|
 | `botanu.run_id` | Generated UUIDv7 |
-| `botanu.use_case` | `name` parameter |
-| `botanu.workflow` | `workflow` parameter or function name |
+| `botanu.workflow` | `name` parameter |
+| `botanu.event_id` | Resolved `event_id` |
+| `botanu.customer_id` | Resolved `customer_id` |
 | `botanu.environment` | Deployment environment |
 | `botanu.tenant_id` | Tenant identifier (if provided) |
 
 ### Alias
 
-`use_case` is an alias for `botanu_use_case`:
+`workflow` is an alias for `botanu_workflow`:
 
 ```python
-from botanu import use_case
+from botanu import workflow
 
-@use_case(name="my_workflow")
-def my_function():
-    return db.query(...)
+@workflow("my-workflow", event_id="evt-001", customer_id="cust-42")
+def do_work():
+    ...
 ```
 
-## @botanu_outcome
+---
 
-Decorator for sub-functions to emit outcomes based on success/failure.
+## run_botanu
+
+Context manager alternative to `@botanu_workflow` for cases where you cannot
+use a decorator (dynamic workflows, scripts, runtime-determined names).
 
 ```python
-from botanu import botanu_outcome
+from botanu import run_botanu
 
-@botanu_outcome()
-def extract_data():
-    return fetch_from_source()
+with run_botanu(
+    name: str,
+    *,
+    event_id: str,
+    customer_id: str,
+    environment: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+    auto_outcome_on_success: bool = True,
+    span_kind: SpanKind = SpanKind.SERVER,
+) as run_ctx: RunContext
 ```
-
-- Emits "success" on completion
-- Emits "failed" with exception class name if exception raised
-- Does NOT create a new run
 
 ### Example
 
 ```python
-from botanu import botanu_use_case, botanu_outcome
+from botanu import run_botanu, emit_outcome
 
-@botanu_use_case(name="my_workflow")
-def my_function():
-    step_one()
-    step_two()
-
-@botanu_outcome()
-def step_one():
-    return do_work()
-
-@botanu_outcome()
-def step_two():
-    return do_more_work()
+with run_botanu("my-workflow", event_id="evt-001", customer_id="cust-42") as run:
+    result = do_something()
+    emit_outcome("success")
 ```
+
+The yielded `RunContext` contains `run_id`, `workflow`, `event_id`, and other
+metadata. Parameters are identical to `@botanu_workflow`.
 
 ## See Also
 
-- [Quickstart](../getting-started/quickstart.md)
+- [Quick Start](../getting-started/quickstart.md)
 - [Run Context](../concepts/run-context.md)

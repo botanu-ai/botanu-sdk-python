@@ -11,7 +11,6 @@ from botanu.sdk.context import (
     get_baggage,
     get_current_span,
     get_run_id,
-    get_use_case,
     get_workflow,
     set_baggage,
 )
@@ -41,10 +40,6 @@ class TestBaggageHelpers:
         result = get_run_id()
         # Result could be None or a previously set value
         assert result is None or isinstance(result, str)
-
-    def test_get_use_case(self):
-        set_baggage("botanu.use_case", "Customer Support")
-        assert get_use_case() == "Customer Support"
 
     def test_get_workflow(self):
         set_baggage("botanu.workflow", "ticket_handler")

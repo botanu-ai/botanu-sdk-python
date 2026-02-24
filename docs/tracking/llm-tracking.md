@@ -202,7 +202,7 @@ Track tool calls triggered by LLMs:
 from botanu.tracking.llm import track_tool_call
 
 with track_tool_call(tool_name="search_database", tool_call_id="call_abc123") as tool:
-    results = await search_database(query)
+    results = await do_work(query)
     tool.set_result(
         success=True,
         items_returned=len(results),
@@ -288,41 +288,35 @@ The SDK automatically records these metrics:
 ## Example: Multi-Provider Workflow
 
 ```python
-from botanu import botanu_use_case, emit_outcome
+from botanu import botanu_workflow, emit_outcome
 from botanu.tracking.llm import track_llm_call
 
-@botanu_use_case("Document Analysis")
-async def analyze_with_fallback(document: str):
-    """Try Claude first, fall back to GPT-4."""
+@botanu_workflow("process-with-fallback", event_id=event_id, customer_id=customer_id)
+async def process_with_fallback(data: str):
+    """Try one provider first, fall back to another."""
 
     try:
         with track_llm_call(provider="anthropic", model="claude-3-opus") as tracker:
             tracker.set_attempt(1)
-            response = await anthropic_client.messages.create(
-                model="claude-3-opus-20240229",
-                messages=[{"role": "user", "content": document}]
-            )
+            response = await do_work(data, provider="anthropic")
             tracker.set_tokens(
                 input_tokens=response.usage.input_tokens,
                 output_tokens=response.usage.output_tokens,
             )
-            emit_outcome("success", value_type="analyses_completed", value_amount=1)
-            return response.content[0].text
+            emit_outcome("success", value_type="items_processed", value_amount=1)
+            return response.content
 
-    except anthropic.RateLimitError:
-        # Fallback to OpenAI
+    except RateLimitError:
+        # Fallback to second provider
         with track_llm_call(provider="openai", model="gpt-4") as tracker:
             tracker.set_attempt(2)
-            response = await openai_client.chat.completions.create(
-                model="gpt-4",
-                messages=[{"role": "user", "content": document}]
-            )
+            response = await do_work(data, provider="openai")
             tracker.set_tokens(
                 input_tokens=response.usage.prompt_tokens,
                 output_tokens=response.usage.completion_tokens,
             )
-            emit_outcome("success", value_type="analyses_completed", value_amount=1)
-            return response.choices[0].message.content
+            emit_outcome("success", value_type="items_processed", value_amount=1)
+            return response.content
 ```
 
 ## See Also

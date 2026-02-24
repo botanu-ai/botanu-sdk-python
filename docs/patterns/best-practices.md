@@ -10,53 +10,38 @@ A run should represent a complete business transaction:
 
 ```python
 # GOOD - One run for one business outcome
-@botanu_use_case("Customer Support")
-async def resolve_ticket(ticket_id: str):
-    context = await fetch_context(ticket_id)
-    response = await generate_response(context)
-    await send_response(ticket_id, response)
-    emit_outcome("success", value_type="tickets_resolved", value_amount=1)
+@botanu_workflow("process_order", event_id=order_id, customer_id=customer_id)
+async def process_order(order_id: str, customer_id: str):
+    data = await fetch_data(order_id)
+    result = await do_work(data)
+    emit_outcome("success", value_type="orders_processed", value_amount=1)
 ```
 
 ```python
 # BAD - Multiple runs for one outcome
-@botanu_use_case("Fetch Context")
-async def fetch_context(ticket_id: str):
+@botanu_workflow("fetch_data", event_id=event_id, customer_id=customer_id)
+async def fetch_data(event_id: str, customer_id: str):
     ...
 
-@botanu_use_case("Generate Response")  # Don't do this
-async def generate_response(context):
+@botanu_workflow("do_work", event_id=event_id, customer_id=customer_id)  # Don't do this
+async def do_work(event_id: str, customer_id: str):
     ...
 ```
 
-### Use Descriptive Use Case Names
+### Use Descriptive Workflow Names
 
-Use cases appear in dashboards and queries. Choose names carefully:
+Workflow names appear in dashboards and queries. Choose names carefully:
 
 ```python
 # GOOD - Clear, descriptive names
-@botanu_use_case("Customer Support")
-@botanu_use_case("Document Analysis")
-@botanu_use_case("Lead Qualification")
+@botanu_workflow("support_resolution", event_id=event_id, customer_id=customer_id)
+@botanu_workflow("document_analysis", event_id=event_id, customer_id=customer_id)
+@botanu_workflow("lead_scoring", event_id=event_id, customer_id=customer_id)
 
 # BAD - Generic or technical names
-@botanu_use_case("HandleRequest")
-@botanu_use_case("Process")
-@botanu_use_case("Main")
-```
-
-### Include Workflow Names
-
-Workflow names help distinguish different paths within a use case:
-
-```python
-@botanu_use_case("Customer Support", workflow="ticket_resolution")
-async def resolve_ticket():
-    ...
-
-@botanu_use_case("Customer Support", workflow="escalation")
-async def escalate_ticket():
-    ...
+@botanu_workflow("handle", event_id=event_id, customer_id=customer_id)
+@botanu_workflow("process", event_id=event_id, customer_id=customer_id)
+@botanu_workflow("main", event_id=event_id, customer_id=customer_id)
 ```
 
 ## Outcome Recording
@@ -66,8 +51,8 @@ async def escalate_ticket():
 Every run should have an explicit outcome:
 
 ```python
-@botanu_use_case("Data Processing")
-async def process_data(data_id: str):
+@botanu_workflow("process_data", event_id=data_id, customer_id=customer_id)
+async def process_data(data_id: str, customer_id: str):
     try:
         result = await process(data_id)
         emit_outcome("success", value_type="records_processed", value_amount=result.count)
@@ -86,7 +71,7 @@ Include value amounts for better ROI analysis:
 
 ```python
 # GOOD - Quantified outcomes
-emit_outcome("success", value_type="emails_sent", value_amount=50)
+emit_outcome("success", value_type="items_sent", value_amount=50)
 emit_outcome("success", value_type="revenue_generated", value_amount=1299.99)
 emit_outcome("success", value_type="documents_processed", value_amount=10)
 
@@ -101,14 +86,14 @@ Standardize your value types across the organization:
 ```python
 # Define standard value types
 class ValueTypes:
-    TICKETS_RESOLVED = "tickets_resolved"
-    DOCUMENTS_PROCESSED = "documents_processed"
-    LEADS_QUALIFIED = "leads_qualified"
-    EMAILS_SENT = "emails_sent"
+    ITEMS_PROCESSED = "items_processed"
+    DOCUMENTS_ANALYZED = "documents_analyzed"
+    LEADS_SCORED = "leads_scored"
+    MESSAGES_SENT = "messages_sent"
     REVENUE_GENERATED = "revenue_generated"
 
 # Use consistently
-emit_outcome("success", value_type=ValueTypes.TICKETS_RESOLVED, value_amount=1)
+emit_outcome("success", value_type=ValueTypes.ITEMS_PROCESSED, value_amount=1)
 ```
 
 ### Include Reasons for Failures
@@ -189,8 +174,8 @@ with track_llm_call(provider="openai", model="text-embedding-3-small", operation
 Include databases, storage, and messaging:
 
 ```python
-@botanu_use_case("ETL Pipeline")
-async def run_etl():
+@botanu_workflow("run_pipeline", event_id=pipeline_id, customer_id=customer_id)
+async def run_pipeline(pipeline_id: str, customer_id: str):
     # Track warehouse query (billed by bytes scanned)
     with track_db_operation(system="snowflake", operation="SELECT") as db:
         db.set_bytes_scanned(result.bytes_scanned)
@@ -235,21 +220,26 @@ app.add_middleware(BotanuMiddleware)
 Inject and extract context manually for async messaging:
 
 ```python
+from botanu.sdk import set_baggage, get_baggage
+
 # Producer
 def publish_message(payload):
-    ctx = get_current_run_context()
     message = {
         "payload": payload,
-        "baggage": ctx.to_baggage_dict() if ctx else {}
+        "baggage": {
+            "botanu.workflow": get_baggage("botanu.workflow"),
+            "botanu.event_id": get_baggage("botanu.event_id"),
+            "botanu.customer_id": get_baggage("botanu.customer_id"),
+        }
     }
     queue.publish(message)
 
 # Consumer
 def process_message(message):
     baggage = message.get("baggage", {})
-    ctx = RunContext.from_baggage(baggage)
-    with ctx.as_current():
-        handle_payload(message["payload"])
+    for key, value in baggage.items():
+        set_baggage(key, value)
+    do_work(message["payload"])
 ```
 
 ### Use Lean Mode for High-Traffic Systems
@@ -258,10 +248,11 @@ Default lean mode minimizes header overhead:
 
 ```python
 # Lean mode: ~100 bytes of baggage
-# Propagates: run_id, use_case
+# Propagates: run_id, botanu.workflow
 
 # Full mode: ~300 bytes of baggage
-# Propagates: run_id, use_case, workflow, environment, tenant_id, parent_run_id
+# Propagates: run_id, botanu.workflow, botanu.event_id, botanu.customer_id,
+#             environment, tenant_id, parent_run_id
 ```
 
 ## Configuration
@@ -300,22 +291,19 @@ propagation:
 For accurate per-tenant cost attribution:
 
 ```python
-@botanu_use_case("Customer Support", tenant_id=request.tenant_id)
-async def handle_ticket(request):
+@botanu_workflow("handle_request", event_id=request_id, customer_id=cust_id, tenant_id=request.tenant_id)
+async def handle_request(request):
     ...
 ```
 
 ### Use Business Context
 
-Add additional attribution dimensions:
+Add additional attribution dimensions via baggage:
 
 ```python
-set_business_context(
-    customer_id=request.customer_id,
-    team="engineering",
-    cost_center="R&D",
-    region="us-west-2",
-)
+set_baggage("team", "engineering")
+set_baggage("cost_center", "R&D")
+set_baggage("region", "us-west-2")
 ```
 
 ## Error Handling
@@ -338,10 +326,10 @@ with track_llm_call(provider="openai", model="gpt-4") as tracker:
 Even failed runs should have outcomes:
 
 ```python
-@botanu_use_case("Data Processing")
-async def process(data_id):
+@botanu_workflow("process_data", event_id=data_id, customer_id=customer_id)
+async def process_data(data_id: str, customer_id: str):
     try:
-        await process_data(data_id)
+        await do_work(data_id)
         emit_outcome("success", value_type="items_processed", value_amount=1)
     except ValidationError:
         emit_outcome("failed", reason="validation_error")
@@ -361,7 +349,7 @@ For async applications, ensure tracking is non-blocking:
 # The SDK uses span events, not separate API calls
 # This is already non-blocking
 with track_llm_call(provider="openai", model="gpt-4") as tracker:
-    response = await async_llm_call()
+    response = await do_something()
     tracker.set_tokens(...)  # Immediate, non-blocking
 ```
 
@@ -405,8 +393,8 @@ from unittest.mock import patch
 
 def test_successful_outcome():
     with patch("botanu.sdk.span_helpers.emit_outcome") as mock_emit:
-        result = await handle_ticket("123")
-        mock_emit.assert_called_with("success", value_type="tickets_resolved", value_amount=1)
+        result = await do_work("123")
+        mock_emit.assert_called_with("success", value_type="items_processed", value_amount=1)
 ```
 
 ## See Also

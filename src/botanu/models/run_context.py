@@ -5,7 +5,7 @@
 
 A "Run" is orthogonal to tracing:
 - Trace context (W3C): ties distributed spans together (trace_id, span_id)
-- Run context (Botanu): ties business execution together (run_id, use_case, outcome)
+- Run context (Botanu): ties business execution together (run_id, workflow, outcome)
 
 Invariant: A run can span multiple traces (retries, async fanout).
 The run_id must remain stable across those boundaries.
@@ -85,9 +85,10 @@ class RunContext:
     """
 
     run_id: str
-    use_case: str
+    workflow: str
+    event_id: str
+    customer_id: str
     environment: str
-    workflow: Optional[str] = None
     workflow_version: Optional[str] = None
     tenant_id: Optional[str] = None
     parent_run_id: Optional[str] = None
@@ -111,8 +112,9 @@ class RunContext:
     @classmethod
     def create(
         cls,
-        use_case: str,
-        workflow: Optional[str] = None,
+        workflow: str,
+        event_id: str,
+        customer_id: str,
         workflow_version: Optional[str] = None,
         environment: Optional[str] = None,
         tenant_id: Optional[str] = None,
@@ -131,9 +133,10 @@ class RunContext:
 
         return cls(
             run_id=run_id,
-            use_case=use_case,
-            environment=env,
             workflow=workflow,
+            event_id=event_id,
+            customer_id=customer_id,
+            environment=env,
             workflow_version=workflow_version,
             tenant_id=tenant_id,
             parent_run_id=parent_run_id,
@@ -147,8 +150,9 @@ class RunContext:
     def create_retry(cls, previous: RunContext) -> RunContext:
         """Create a new RunContext for a retry attempt."""
         return cls.create(
-            use_case=previous.use_case,
             workflow=previous.workflow,
+            event_id=previous.event_id,
+            customer_id=previous.customer_id,
             workflow_version=previous.workflow_version,
             environment=previous.environment,
             tenant_id=previous.tenant_id,
@@ -215,14 +219,14 @@ class RunContext:
 
         baggage: Dict[str, str] = {
             "botanu.run_id": self.run_id,
-            "botanu.use_case": self.use_case,
+            "botanu.workflow": self.workflow,
+            "botanu.event_id": self.event_id,
+            "botanu.customer_id": self.customer_id,
         }
         if lean_mode:
             return baggage
 
         baggage["botanu.environment"] = self.environment
-        if self.workflow:
-            baggage["botanu.workflow"] = self.workflow
         if self.tenant_id:
             baggage["botanu.tenant_id"] = self.tenant_id
         if self.parent_run_id:
@@ -243,12 +247,12 @@ class RunContext:
         """Convert to dict for span attributes."""
         attrs: Dict[str, Union[str, float, int, bool]] = {
             "botanu.run_id": self.run_id,
-            "botanu.use_case": self.use_case,
+            "botanu.workflow": self.workflow,
+            "botanu.event_id": self.event_id,
+            "botanu.customer_id": self.customer_id,
             "botanu.environment": self.environment,
             "botanu.run.start_time": self.start_time.isoformat(),
         }
-        if self.workflow:
-            attrs["botanu.workflow"] = self.workflow
         if self.workflow_version:
             attrs["botanu.workflow.version"] = self.workflow_version
         if self.tenant_id:
@@ -285,8 +289,8 @@ class RunContext:
     def from_baggage(cls, baggage: Dict[str, str]) -> Optional[RunContext]:
         """Reconstruct RunContext from baggage dict."""
         run_id = baggage.get("botanu.run_id")
-        use_case = baggage.get("botanu.use_case")
-        if not run_id or not use_case:
+        workflow = baggage.get("botanu.workflow")
+        if not run_id or not workflow:
             return None
 
         attempt_str = baggage.get("botanu.attempt", "1")
@@ -305,11 +309,15 @@ class RunContext:
 
         cancelled = baggage.get("botanu.cancelled", "").lower() == "true"
 
+        event_id = baggage.get("botanu.event_id", "")
+        customer_id = baggage.get("botanu.customer_id", "")
+
         return cls(
             run_id=run_id,
-            use_case=use_case,
+            workflow=workflow,
+            event_id=event_id,
+            customer_id=customer_id,
             environment=baggage.get("botanu.environment", "unknown"),
-            workflow=baggage.get("botanu.workflow"),
             tenant_id=baggage.get("botanu.tenant_id"),
             parent_run_id=baggage.get("botanu.parent_run_id"),
             root_run_id=baggage.get("botanu.root_run_id") or run_id,

@@ -7,6 +7,9 @@ from __future__ import annotations
 
 import pytest
 from opentelemetry import trace
+from opentelemetry._logs import set_logger_provider
+from opentelemetry.sdk._logs import LoggerProvider
+from opentelemetry.sdk._logs.export import SimpleLogRecordProcessor, InMemoryLogExporter
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
@@ -15,6 +18,13 @@ from opentelemetry.sdk.trace.sampling import ALWAYS_ON
 # Module-level provider and exporter to avoid "cannot override" warnings
 _provider: TracerProvider = None
 _exporter: InMemorySpanExporter = None
+
+# Log provider/exporter — set eagerly at module level before any code accesses
+# get_logger_provider(), because OTel only allows set_logger_provider() once.
+_log_exporter = InMemoryLogExporter()
+_log_provider = LoggerProvider()
+_log_provider.add_log_record_processor(SimpleLogRecordProcessor(_log_exporter))
+set_logger_provider(_log_provider)
 
 
 def _get_or_create_provider() -> tuple[TracerProvider, InMemorySpanExporter]:
@@ -57,3 +67,10 @@ def memory_exporter():
 def tracer(tracer_provider):
     """Get a tracer instance."""
     return trace.get_tracer("test-tracer")
+
+
+@pytest.fixture
+def log_exporter():
+    """Get the in-memory log exporter for testing."""
+    _log_exporter.clear()
+    return _log_exporter

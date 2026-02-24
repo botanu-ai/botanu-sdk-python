@@ -18,7 +18,7 @@ class TestTrackLLMCall:
     """Tests for track_llm_call context manager."""
 
     def test_creates_span_with_model_name(self, memory_exporter):
-        with track_llm_call(model="gpt-4", provider="openai") as tracker:
+        with track_llm_call(model="gpt-4", vendor="openai") as tracker:
             tracker.set_tokens(input_tokens=100, output_tokens=50)
 
         spans = memory_exporter.get_finished_spans()
@@ -27,7 +27,7 @@ class TestTrackLLMCall:
         assert spans[0].name == "chat gpt-4"
 
     def test_records_token_usage(self, memory_exporter):
-        with track_llm_call(model="claude-3-opus", provider="anthropic") as tracker:
+        with track_llm_call(model="claude-3-opus", vendor="anthropic") as tracker:
             tracker.set_tokens(input_tokens=500, output_tokens=200)
 
         spans = memory_exporter.get_finished_spans()
@@ -38,7 +38,7 @@ class TestTrackLLMCall:
 
     def test_records_error_on_exception(self, memory_exporter):
         with pytest.raises(ValueError):
-            with track_llm_call(model="gpt-4", provider="openai") as _tracker:
+            with track_llm_call(model="gpt-4", vendor="openai") as _tracker:
                 raise ValueError("API error")
 
         spans = memory_exporter.get_finished_spans()
@@ -48,7 +48,7 @@ class TestTrackLLMCall:
     def test_operation_type_attribute(self, memory_exporter):
         with track_llm_call(
             model="gpt-4",
-            provider="openai",
+            vendor="openai",
             operation=ModelOperation.EMBEDDINGS,
         ):
             pass
@@ -60,7 +60,7 @@ class TestTrackLLMCall:
     def test_request_params(self, memory_exporter):
         with track_llm_call(
             model="gpt-4",
-            provider="openai",
+            vendor="openai",
         ) as tracker:
             tracker.set_request_params(temperature=0.7, max_tokens=1000)
 
@@ -74,15 +74,15 @@ class TestLLMTracker:
     """Tests for LLMTracker helper methods."""
 
     def test_set_request_id(self, memory_exporter):
-        with track_llm_call(model="gpt-4", provider="openai") as tracker:
-            tracker.set_request_id(provider_request_id="resp_123")
+        with track_llm_call(model="gpt-4", vendor="openai") as tracker:
+            tracker.set_request_id(vendor_request_id="resp_123")
 
         spans = memory_exporter.get_finished_spans()
         attrs = dict(spans[0].attributes)
         assert attrs[GenAIAttributes.RESPONSE_ID] == "resp_123"
 
     def test_set_finish_reason(self, memory_exporter):
-        with track_llm_call(model="gpt-4", provider="openai") as tracker:
+        with track_llm_call(model="gpt-4", vendor="openai") as tracker:
             tracker.set_finish_reason("stop")
 
         spans = memory_exporter.get_finished_spans()
@@ -91,11 +91,11 @@ class TestLLMTracker:
         assert attrs[GenAIAttributes.RESPONSE_FINISH_REASONS] == ("stop",)
 
 
-class TestProviderNormalization:
+class TestVendorNormalization:
     """Tests for provider name normalization."""
 
     def test_openai_normalized(self, memory_exporter):
-        with track_llm_call(model="gpt-4", provider="OpenAI"):
+        with track_llm_call(model="gpt-4", vendor="OpenAI"):
             pass
 
         spans = memory_exporter.get_finished_spans()
@@ -103,7 +103,7 @@ class TestProviderNormalization:
         assert attrs[GenAIAttributes.PROVIDER_NAME] == "openai"
 
     def test_anthropic_normalized(self, memory_exporter):
-        with track_llm_call(model="claude-3", provider="Anthropic"):
+        with track_llm_call(model="claude-3", vendor="Anthropic"):
             pass
 
         spans = memory_exporter.get_finished_spans()
@@ -111,7 +111,7 @@ class TestProviderNormalization:
         assert attrs[GenAIAttributes.PROVIDER_NAME] == "anthropic"
 
     def test_bedrock_normalized(self, memory_exporter):
-        with track_llm_call(model="claude-v2", provider="bedrock"):
+        with track_llm_call(model="claude-v2", vendor="bedrock"):
             pass
 
         spans = memory_exporter.get_finished_spans()
@@ -119,7 +119,7 @@ class TestProviderNormalization:
         assert attrs[GenAIAttributes.PROVIDER_NAME] == "aws.bedrock"
 
     def test_vertex_normalized(self, memory_exporter):
-        with track_llm_call(model="gemini-pro", provider="vertex_ai"):
+        with track_llm_call(model="gemini-pro", vendor="vertex_ai"):
             pass
 
         spans = memory_exporter.get_finished_spans()
@@ -127,7 +127,7 @@ class TestProviderNormalization:
         assert attrs[GenAIAttributes.PROVIDER_NAME] == "gcp.vertex_ai"
 
     def test_azure_openai_normalized(self, memory_exporter):
-        with track_llm_call(model="gpt-4", provider="azure_openai"):
+        with track_llm_call(model="gpt-4", vendor="azure_openai"):
             pass
 
         spans = memory_exporter.get_finished_spans()
@@ -136,7 +136,7 @@ class TestProviderNormalization:
 
     def test_unknown_provider_passthrough(self, memory_exporter):
         """Unknown provider names should be normalized to lowercase."""
-        with track_llm_call(model="custom-model", provider="CustomProvider"):
+        with track_llm_call(model="custom-model", vendor="CustomProvider"):
             pass
 
         spans = memory_exporter.get_finished_spans()
@@ -150,7 +150,7 @@ class TestLLMTrackerExtended:
     def test_set_streaming(self, memory_exporter):
         from botanu.tracking.llm import BotanuAttributes
 
-        with track_llm_call(model="gpt-4", provider="openai") as tracker:
+        with track_llm_call(model="gpt-4", vendor="openai") as tracker:
             tracker.set_streaming(True)
 
         spans = memory_exporter.get_finished_spans()
@@ -160,7 +160,7 @@ class TestLLMTrackerExtended:
     def test_set_cache_hit(self, memory_exporter):
         from botanu.tracking.llm import BotanuAttributes
 
-        with track_llm_call(model="gpt-4", provider="openai") as tracker:
+        with track_llm_call(model="gpt-4", vendor="openai") as tracker:
             tracker.set_cache_hit(True)
 
         spans = memory_exporter.get_finished_spans()
@@ -170,7 +170,7 @@ class TestLLMTrackerExtended:
     def test_set_attempt(self, memory_exporter):
         from botanu.tracking.llm import BotanuAttributes
 
-        with track_llm_call(model="gpt-4", provider="openai") as tracker:
+        with track_llm_call(model="gpt-4", vendor="openai") as tracker:
             tracker.set_attempt(3)
 
         spans = memory_exporter.get_finished_spans()
@@ -178,7 +178,7 @@ class TestLLMTrackerExtended:
         assert attrs[BotanuAttributes.ATTEMPT_NUMBER] == 3
 
     def test_set_response_model(self, memory_exporter):
-        with track_llm_call(model="gpt-4", provider="openai") as tracker:
+        with track_llm_call(model="gpt-4", vendor="openai") as tracker:
             tracker.set_response_model("gpt-4-0125-preview")
 
         spans = memory_exporter.get_finished_spans()
@@ -188,7 +188,7 @@ class TestLLMTrackerExtended:
     def test_set_tokens_with_cache(self, memory_exporter):
         from botanu.tracking.llm import BotanuAttributes
 
-        with track_llm_call(model="claude-3", provider="anthropic") as tracker:
+        with track_llm_call(model="claude-3", vendor="anthropic") as tracker:
             tracker.set_tokens(
                 input_tokens=100,
                 output_tokens=50,
@@ -206,19 +206,19 @@ class TestLLMTrackerExtended:
     def test_set_request_id_with_client_id(self, memory_exporter):
         from botanu.tracking.llm import BotanuAttributes
 
-        with track_llm_call(model="gpt-4", provider="openai") as tracker:
+        with track_llm_call(model="gpt-4", vendor="openai") as tracker:
             tracker.set_request_id(
-                provider_request_id="resp_123",
+                vendor_request_id="resp_123",
                 client_request_id="client_456",
             )
 
         spans = memory_exporter.get_finished_spans()
         attrs = dict(spans[0].attributes)
         assert attrs[GenAIAttributes.RESPONSE_ID] == "resp_123"
-        assert attrs[BotanuAttributes.CLIENT_REQUEST_ID] == "client_456"
+        assert attrs[BotanuAttributes.VENDOR_CLIENT_REQUEST_ID] == "client_456"
 
     def test_set_request_params_extended(self, memory_exporter):
-        with track_llm_call(model="gpt-4", provider="openai") as tracker:
+        with track_llm_call(model="gpt-4", vendor="openai") as tracker:
             tracker.set_request_params(
                 temperature=0.8,
                 top_p=0.95,
@@ -239,7 +239,7 @@ class TestLLMTrackerExtended:
         assert attrs[GenAIAttributes.REQUEST_PRESENCE_PENALTY] == 0.3
 
     def test_add_metadata(self, memory_exporter):
-        with track_llm_call(model="gpt-4", provider="openai") as tracker:
+        with track_llm_call(model="gpt-4", vendor="openai") as tracker:
             tracker.add_metadata(custom_field="value", another_field=123)
 
         spans = memory_exporter.get_finished_spans()
@@ -248,7 +248,7 @@ class TestLLMTrackerExtended:
         assert attrs["botanu.another_field"] == 123
 
     def test_add_metadata_preserves_prefix(self, memory_exporter):
-        with track_llm_call(model="gpt-4", provider="openai") as tracker:
+        with track_llm_call(model="gpt-4", vendor="openai") as tracker:
             tracker.add_metadata(**{"botanu.explicit": "prefixed"})
 
         spans = memory_exporter.get_finished_spans()
@@ -256,7 +256,7 @@ class TestLLMTrackerExtended:
         assert attrs["botanu.explicit"] == "prefixed"
 
     def test_set_error_manually(self, memory_exporter):
-        with track_llm_call(model="gpt-4", provider="openai") as tracker:
+        with track_llm_call(model="gpt-4", vendor="openai") as tracker:
             error = RuntimeError("Rate limit exceeded")
             tracker.set_error(error)
 
@@ -326,7 +326,7 @@ class TestTrackToolCall:
         with track_tool_call(
             tool_name="web_search",
             tool_call_id="call_abc123",
-            provider="tavily",
+            vendor="tavily",
         ):
             pass
 
@@ -403,12 +403,12 @@ class TestStandaloneHelpers:
         tracer = otl_trace.get_tracer("test")
         with tracer.start_as_current_span("test-llm-attrs"):
             set_llm_attributes(
-                provider="openai",
+                vendor="openai",
                 model="gpt-4",
                 input_tokens=150,
                 output_tokens=75,
                 streaming=True,
-                provider_request_id="resp_abc",
+                vendor_request_id="resp_abc",
             )
 
         spans = memory_exporter.get_finished_spans()
@@ -424,7 +424,7 @@ class TestStandaloneHelpers:
         from botanu.tracking.llm import set_llm_attributes
 
         # Should not raise when no recording span
-        set_llm_attributes(provider="openai", model="gpt-4")
+        set_llm_attributes(vendor="openai", model="gpt-4")
 
     def test_set_token_usage(self, memory_exporter):
         from opentelemetry import trace as otl_trace
@@ -454,7 +454,7 @@ class TestLLMInstrumentedDecorator:
     def test_decorator_creates_span(self, memory_exporter):
         from botanu.tracking.llm import llm_instrumented
 
-        @llm_instrumented(provider="openai")
+        @llm_instrumented(vendor="openai")
         def fake_completion(prompt, model="gpt-4"):
             class _Usage:
                 prompt_tokens = 10
@@ -479,7 +479,7 @@ class TestLLMInstrumentedDecorator:
     def test_decorator_with_streaming(self, memory_exporter):
         from botanu.tracking.llm import BotanuAttributes, llm_instrumented
 
-        @llm_instrumented(provider="anthropic")
+        @llm_instrumented(vendor="anthropic")
         def fake_stream(prompt, model="claude-3", stream=False):
             return "streamed"
 
@@ -492,7 +492,7 @@ class TestLLMInstrumentedDecorator:
     def test_decorator_without_usage(self, memory_exporter):
         from botanu.tracking.llm import llm_instrumented
 
-        @llm_instrumented(provider="custom", tokens_from_response=False)
+        @llm_instrumented(vendor="custom", tokens_from_response=False)
         def no_usage_fn(prompt, model="custom-model"):
             return "done"
 
@@ -511,14 +511,14 @@ class TestClientRequestId:
 
         with track_llm_call(
             model="gpt-4",
-            provider="openai",
+            vendor="openai",
             client_request_id="cli-req-001",
         ):
             pass
 
         spans = memory_exporter.get_finished_spans()
         attrs = dict(spans[0].attributes)
-        assert attrs[BotanuAttributes.CLIENT_REQUEST_ID] == "cli-req-001"
+        assert attrs[BotanuAttributes.VENDOR_CLIENT_REQUEST_ID] == "cli-req-001"
 
 
 class TestKwargsPassthrough:
@@ -527,7 +527,7 @@ class TestKwargsPassthrough:
     def test_custom_kwargs(self, memory_exporter):
         with track_llm_call(
             model="gpt-4",
-            provider="openai",
+            vendor="openai",
             deployment_id="dep-001",
         ):
             pass

@@ -10,7 +10,7 @@ Usage::
 
     from botanu.tracking.llm import track_llm_call, track_tool_call
 
-    with track_llm_call(provider="openai", model="gpt-4") as tracker:
+    with track_llm_call(vendor="openai", model="gpt-4") as tracker:
         response = openai.chat.completions.create(...)
         tracker.set_tokens(
             input_tokens=response.usage.prompt_tokens,
@@ -21,6 +21,7 @@ Usage::
 
 from __future__ import annotations
 
+import contextvars
 import functools
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -29,6 +30,12 @@ from typing import Any, Dict, Generator, List, Optional
 
 from opentelemetry import metrics, trace
 from opentelemetry.trace import Span, SpanKind, Status, StatusCode
+
+# Context variable for automatic retry detection (set by tenacity integration).
+# Default 0 means "not set by retry callback"; 1+ means the attempt number.
+_retry_attempt: contextvars.ContextVar[int] = contextvars.ContextVar(
+    "botanu_retry_attempt", default=0
+)
 
 # =========================================================================
 # OTel GenAI Semantic Convention Attribute Names
@@ -60,8 +67,8 @@ class GenAIAttributes:
 class BotanuAttributes:
     """Botanu-specific attributes for cost attribution."""
 
-    PROVIDER_REQUEST_ID = "botanu.provider.request_id"
-    CLIENT_REQUEST_ID = "botanu.provider.client_request_id"
+    VENDOR_REQUEST_ID = "botanu.vendor.request_id"
+    VENDOR_CLIENT_REQUEST_ID = "botanu.vendor.client_request_id"
     TOKENS_CACHED = "botanu.usage.cached_tokens"
     TOKENS_CACHED_READ = "botanu.usage.cache_read_tokens"
     TOKENS_CACHED_WRITE = "botanu.usage.cache_write_tokens"
@@ -76,10 +83,10 @@ class BotanuAttributes:
 
 
 # =========================================================================
-# Provider name mapping
+# Vendor name normalization
 # =========================================================================
 
-LLM_PROVIDERS: Dict[str, str] = {
+LLM_VENDORS: Dict[str, str] = {
     "openai": "openai",
     "azure_openai": "azure.openai",
     "azure-openai": "azure.openai",
@@ -160,7 +167,7 @@ _attempt_counter = _meter.create_counter(
 
 
 def _record_token_metrics(
-    provider: str,
+    vendor: str,
     model: str,
     operation: str,
     input_tokens: int,
@@ -169,7 +176,7 @@ def _record_token_metrics(
 ) -> None:
     base_attrs: Dict[str, str] = {
         GenAIAttributes.OPERATION_NAME: operation,
-        GenAIAttributes.PROVIDER_NAME: provider,
+        GenAIAttributes.PROVIDER_NAME: vendor,
         GenAIAttributes.REQUEST_MODEL: model,
     }
     if error_type:
@@ -188,7 +195,7 @@ def _record_token_metrics(
 
 
 def _record_duration_metric(
-    provider: str,
+    vendor: str,
     model: str,
     operation: str,
     duration_seconds: float,
@@ -196,7 +203,7 @@ def _record_duration_metric(
 ) -> None:
     attrs: Dict[str, str] = {
         GenAIAttributes.OPERATION_NAME: operation,
-        GenAIAttributes.PROVIDER_NAME: provider,
+        GenAIAttributes.PROVIDER_NAME: vendor,
         GenAIAttributes.REQUEST_MODEL: model,
     }
     if error_type:
@@ -214,7 +221,7 @@ def _record_duration_metric(
 class LLMTracker:
     """Context manager for tracking LLM calls with OTel GenAI semconv."""
 
-    provider: str
+    vendor: str
     model: str
     operation: str = ModelOperation.CHAT
     span: Optional[Span] = field(default=None, repr=False)
@@ -226,7 +233,7 @@ class LLMTracker:
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
 
-    provider_request_id: Optional[str] = None
+    vendor_request_id: Optional[str] = None
     client_request_id: Optional[str] = None
     response_model: Optional[str] = None
     finish_reason: Optional[str] = None
@@ -263,19 +270,19 @@ class LLMTracker:
 
     def set_request_id(
         self,
-        provider_request_id: Optional[str] = None,
+        vendor_request_id: Optional[str] = None,
         client_request_id: Optional[str] = None,
     ) -> LLMTracker:
-        """Set provider request IDs for billing reconciliation."""
-        if provider_request_id:
-            self.provider_request_id = provider_request_id
+        """Set vendor request IDs for billing reconciliation."""
+        if vendor_request_id:
+            self.vendor_request_id = vendor_request_id
             if self.span:
-                self.span.set_attribute(GenAIAttributes.RESPONSE_ID, provider_request_id)
-                self.span.set_attribute(BotanuAttributes.PROVIDER_REQUEST_ID, provider_request_id)
+                self.span.set_attribute(GenAIAttributes.RESPONSE_ID, vendor_request_id)
+                self.span.set_attribute(BotanuAttributes.VENDOR_REQUEST_ID, vendor_request_id)
         if client_request_id:
             self.client_request_id = client_request_id
             if self.span:
-                self.span.set_attribute(BotanuAttributes.CLIENT_REQUEST_ID, client_request_id)
+                self.span.set_attribute(BotanuAttributes.VENDOR_CLIENT_REQUEST_ID, client_request_id)
         return self
 
     def set_response_model(self, model: str) -> LLMTracker:
@@ -362,7 +369,7 @@ class LLMTracker:
         duration_seconds = (datetime.now(timezone.utc) - self.start_time).total_seconds()
 
         _record_token_metrics(
-            provider=self.provider,
+            vendor=self.vendor,
             model=self.model,
             operation=self.operation,
             input_tokens=self.input_tokens,
@@ -370,7 +377,7 @@ class LLMTracker:
             error_type=self.error_type,
         )
         _record_duration_metric(
-            provider=self.provider,
+            vendor=self.vendor,
             model=self.model,
             operation=self.operation,
             duration_seconds=duration_seconds,
@@ -379,7 +386,7 @@ class LLMTracker:
         _attempt_counter.add(
             1,
             {
-                GenAIAttributes.PROVIDER_NAME: self.provider,
+                GenAIAttributes.PROVIDER_NAME: self.vendor,
                 GenAIAttributes.REQUEST_MODEL: self.model,
                 GenAIAttributes.OPERATION_NAME: self.operation,
                 "status": "error" if self.error_type else "success",
@@ -389,7 +396,7 @@ class LLMTracker:
 
 @contextmanager
 def track_llm_call(
-    provider: str,
+    vendor: str,
     model: str,
     operation: str = ModelOperation.CHAT,
     client_request_id: Optional[str] = None,
@@ -398,7 +405,7 @@ def track_llm_call(
     """Context manager for tracking LLM/model calls with OTel GenAI semconv.
 
     Args:
-        provider: LLM provider (openai, anthropic, bedrock, vertex, …).
+        vendor: LLM vendor (openai, anthropic, bedrock, vertex, …).
         model: Model name/ID (gpt-4, claude-3-opus, …).
         operation: Type of operation (chat, embeddings, text_completion, …).
         client_request_id: Optional client-generated request ID.
@@ -408,27 +415,32 @@ def track_llm_call(
         :class:`LLMTracker` instance.
     """
     tracer = trace.get_tracer("botanu.gen_ai")
-    normalized_provider = LLM_PROVIDERS.get(provider.lower(), provider.lower())
+    normalized_vendor = LLM_VENDORS.get(vendor.lower(), vendor.lower())
     span_name = f"{operation} {model}"
 
     with tracer.start_as_current_span(name=span_name, kind=SpanKind.CLIENT) as span:
         span.set_attribute(GenAIAttributes.OPERATION_NAME, operation)
-        span.set_attribute(GenAIAttributes.PROVIDER_NAME, normalized_provider)
+        span.set_attribute(GenAIAttributes.PROVIDER_NAME, normalized_vendor)
         span.set_attribute(GenAIAttributes.REQUEST_MODEL, model)
-        span.set_attribute(BotanuAttributes.VENDOR, normalized_provider)
+        span.set_attribute(BotanuAttributes.VENDOR, normalized_vendor)
 
         for key, value in kwargs.items():
             attr_key = key if key.startswith(("botanu.", "gen_ai.")) else f"botanu.{key}"
             span.set_attribute(attr_key, value)
 
         tracker = LLMTracker(
-            provider=normalized_provider,
+            vendor=normalized_vendor,
             model=model,
             operation=operation,
             span=span,
         )
         if client_request_id:
             tracker.set_request_id(client_request_id=client_request_id)
+
+        # Auto-detect retry attempt from tenacity integration.
+        ctx_attempt = _retry_attempt.get()
+        if ctx_attempt > 0:
+            tracker.set_attempt(ctx_attempt)
 
         try:
             yield tracker
@@ -462,7 +474,7 @@ class ToolTracker:
 
     tool_name: str
     tool_call_id: Optional[str] = None
-    provider: Optional[str] = None
+    vendor: Optional[str] = None
     span: Optional[Span] = field(default=None, repr=False)
     start_time: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -524,8 +536,8 @@ class ToolTracker:
             GenAIAttributes.TOOL_NAME: self.tool_name,
             "status": "error" if self.error_type else "success",
         }
-        if self.provider:
-            attrs[GenAIAttributes.PROVIDER_NAME] = self.provider
+        if self.vendor:
+            attrs[GenAIAttributes.PROVIDER_NAME] = self.vendor
 
         _tool_duration_histogram.record(duration_seconds, attrs)
         _tool_counter.add(1, attrs)
@@ -535,7 +547,7 @@ class ToolTracker:
 def track_tool_call(
     tool_name: str,
     tool_call_id: Optional[str] = None,
-    provider: Optional[str] = None,
+    vendor: Optional[str] = None,
     **kwargs: Any,
 ) -> Generator[ToolTracker, None, None]:
     """Context manager for tracking tool/function calls.
@@ -543,7 +555,7 @@ def track_tool_call(
     Args:
         tool_name: Name of the tool/function.
         tool_call_id: Tool call ID from the LLM response.
-        provider: Tool provider if external (e.g., ``"tavily"``).
+        vendor: Tool vendor if external (e.g., ``"tavily"``).
         **kwargs: Additional span attributes.
 
     Yields:
@@ -558,8 +570,8 @@ def track_tool_call(
 
         if tool_call_id:
             span.set_attribute(GenAIAttributes.TOOL_CALL_ID, tool_call_id)
-        if provider:
-            normalized = LLM_PROVIDERS.get(provider.lower(), provider.lower())
+        if vendor:
+            normalized = LLM_VENDORS.get(vendor.lower(), vendor.lower())
             span.set_attribute(GenAIAttributes.PROVIDER_NAME, normalized)
             span.set_attribute(BotanuAttributes.VENDOR, normalized)
 
@@ -570,7 +582,7 @@ def track_tool_call(
         tracker = ToolTracker(
             tool_name=tool_name,
             tool_call_id=tool_call_id,
-            provider=provider,
+            vendor=vendor,
             span=span,
         )
 
@@ -589,14 +601,14 @@ def track_tool_call(
 
 
 def set_llm_attributes(
-    provider: str,
+    vendor: str,
     model: str,
     operation: str = ModelOperation.CHAT,
     input_tokens: int = 0,
     output_tokens: int = 0,
     cached_tokens: int = 0,
     streaming: bool = False,
-    provider_request_id: Optional[str] = None,
+    vendor_request_id: Optional[str] = None,
     span: Optional[Span] = None,
 ) -> None:
     """Set LLM attributes on the current span using OTel GenAI semconv."""
@@ -604,12 +616,12 @@ def set_llm_attributes(
     if not target_span or not target_span.is_recording():
         return
 
-    normalized_provider = LLM_PROVIDERS.get(provider.lower(), provider.lower())
+    normalized_vendor = LLM_VENDORS.get(vendor.lower(), vendor.lower())
 
     target_span.set_attribute(GenAIAttributes.OPERATION_NAME, operation)
-    target_span.set_attribute(GenAIAttributes.PROVIDER_NAME, normalized_provider)
+    target_span.set_attribute(GenAIAttributes.PROVIDER_NAME, normalized_vendor)
     target_span.set_attribute(GenAIAttributes.REQUEST_MODEL, model)
-    target_span.set_attribute(BotanuAttributes.VENDOR, normalized_provider)
+    target_span.set_attribute(BotanuAttributes.VENDOR, normalized_vendor)
 
     if input_tokens > 0:
         target_span.set_attribute(GenAIAttributes.USAGE_INPUT_TOKENS, input_tokens)
@@ -619,12 +631,12 @@ def set_llm_attributes(
         target_span.set_attribute(BotanuAttributes.TOKENS_CACHED, cached_tokens)
     if streaming:
         target_span.set_attribute(BotanuAttributes.STREAMING, True)
-    if provider_request_id:
-        target_span.set_attribute(GenAIAttributes.RESPONSE_ID, provider_request_id)
-        target_span.set_attribute(BotanuAttributes.PROVIDER_REQUEST_ID, provider_request_id)
+    if vendor_request_id:
+        target_span.set_attribute(GenAIAttributes.RESPONSE_ID, vendor_request_id)
+        target_span.set_attribute(BotanuAttributes.VENDOR_REQUEST_ID, vendor_request_id)
 
     _record_token_metrics(
-        provider=normalized_provider,
+        vendor=normalized_vendor,
         model=model,
         operation=operation,
         input_tokens=input_tokens,
@@ -651,14 +663,14 @@ def set_token_usage(
 
 
 def llm_instrumented(
-    provider: str,
+    vendor: str,
     model_param: str = "model",
     tokens_from_response: bool = True,
 ) -> Any:
     """Decorator to auto-instrument LLM client methods.
 
     Args:
-        provider: LLM provider name.
+        vendor: LLM vendor name.
         model_param: Name of the parameter containing the model name.
         tokens_from_response: Whether to extract tokens from ``response.usage``.
     """
@@ -668,7 +680,7 @@ def llm_instrumented(
         def wrapper(*args: Any, **kwargs: Any) -> Any:
             model = kwargs.get(model_param) or (args[1] if len(args) > 1 else "unknown")
 
-            with track_llm_call(provider, model) as tracker:
+            with track_llm_call(vendor, model) as tracker:
                 if kwargs.get("stream"):
                     tracker.set_streaming(True)
 

@@ -402,6 +402,8 @@ emit_outcome(
     value_amount: Optional[float] = None,
     confidence: Optional[float] = None,
     reason: Optional[str] = None,
+    error_type: Optional[str] = None,
+    metadata: Optional[dict[str, str]] = None,
 ) -> None
 ```
 
@@ -409,17 +411,19 @@ emit_outcome(
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `status` | `str` | Required | Outcome status ("success", "partial", "failed") |
+| `status` | `str` | Required | Outcome status: `"success"`, `"partial"`, `"failed"`, `"timeout"`, `"canceled"`, `"abandoned"` |
 | `value_type` | `str` | `None` | Type of business value achieved |
 | `value_amount` | `float` | `None` | Quantified value amount |
 | `confidence` | `float` | `None` | Confidence score (0.0-1.0) |
 | `reason` | `str` | `None` | Reason for the outcome |
+| `error_type` | `str` | `None` | Error classification (e.g. `"TimeoutError"`) |
+| `metadata` | `dict[str, str]` | `None` | Additional key-value metadata |
 
 #### Example
 
 ```python
-emit_outcome("success", value_type="tickets_resolved", value_amount=1)
-emit_outcome("failed", reason="rate_limit_exceeded")
+emit_outcome("success", value_type="items_processed", value_amount=1)
+emit_outcome("failed", error_type="TimeoutError", reason="LLM took >30s")
 ```
 
 ---
@@ -463,14 +467,14 @@ from botanu import get_run_id
 run_id = get_run_id()
 ```
 
-### get_use_case()
+### get_workflow()
 
-Get the current use case from baggage.
+Get the current workflow name from baggage.
 
 ```python
-from botanu import get_use_case
+from botanu import get_workflow
 
-use_case = get_use_case()
+workflow = get_workflow()
 ```
 
 ### get_baggage()

@@ -43,28 +43,30 @@ class TestRunContextCreate:
     """Tests for RunContext.create factory."""
 
     def test_creates_with_required_fields(self):
-        ctx = RunContext.create(use_case="Customer Support")
+        ctx = RunContext.create(workflow="Customer Support", event_id="evt-1", customer_id="cust-1")
         assert ctx.run_id is not None
-        assert ctx.use_case == "Customer Support"
+        assert ctx.workflow == "Customer Support"
+        assert ctx.event_id == "evt-1"
+        assert ctx.customer_id == "cust-1"
         assert ctx.environment == "production"  # default
         assert ctx.attempt == 1
 
     def test_root_run_id_defaults_to_run_id(self):
-        ctx = RunContext.create(use_case="test")
+        ctx = RunContext.create(workflow="test", event_id="evt-1", customer_id="cust-1")
         assert ctx.root_run_id == ctx.run_id
 
     def test_accepts_custom_root_run_id(self):
-        ctx = RunContext.create(use_case="test", root_run_id="custom-root")
+        ctx = RunContext.create(workflow="test", event_id="evt-1", customer_id="cust-1", root_run_id="custom-root")
         assert ctx.root_run_id == "custom-root"
 
     def test_environment_from_env_var(self):
         with mock.patch.dict(os.environ, {"BOTANU_ENVIRONMENT": "staging"}):
-            ctx = RunContext.create(use_case="test")
+            ctx = RunContext.create(workflow="test", event_id="evt-1", customer_id="cust-1")
             assert ctx.environment == "staging"
 
     def test_explicit_environment_overrides_env_var(self):
         with mock.patch.dict(os.environ, {"BOTANU_ENVIRONMENT": "staging"}):
-            ctx = RunContext.create(use_case="test", environment="production")
+            ctx = RunContext.create(workflow="test", event_id="evt-1", customer_id="cust-1", environment="production")
             assert ctx.environment == "production"
 
 
@@ -72,7 +74,7 @@ class TestRunContextRetry:
     """Tests for retry handling."""
 
     def test_create_retry_increments_attempt(self):
-        original = RunContext.create(use_case="test")
+        original = RunContext.create(workflow="test", event_id="evt-1", customer_id="cust-1")
         retry = RunContext.create_retry(original)
 
         assert retry.attempt == 2
@@ -80,8 +82,15 @@ class TestRunContextRetry:
         assert retry.root_run_id == original.root_run_id
         assert retry.run_id != original.run_id
 
+    def test_create_retry_preserves_event_and_customer(self):
+        original = RunContext.create(workflow="test", event_id="ticket-42", customer_id="bigretail")
+        retry = RunContext.create_retry(original)
+
+        assert retry.event_id == "ticket-42"
+        assert retry.customer_id == "bigretail"
+
     def test_multiple_retries_preserve_root(self):
-        original = RunContext.create(use_case="test")
+        original = RunContext.create(workflow="test", event_id="evt-1", customer_id="cust-1")
         retry1 = RunContext.create_retry(original)
         retry2 = RunContext.create_retry(retry1)
 
@@ -93,17 +102,17 @@ class TestRunContextDeadline:
     """Tests for deadline handling."""
 
     def test_deadline_seconds(self):
-        ctx = RunContext.create(use_case="test", deadline_seconds=10.0)
+        ctx = RunContext.create(workflow="test", event_id="evt-1", customer_id="cust-1", deadline_seconds=10.0)
         assert ctx.deadline is not None
         assert ctx.deadline > time.time()
 
     def test_is_past_deadline(self):
-        ctx = RunContext.create(use_case="test", deadline_seconds=0.001)
+        ctx = RunContext.create(workflow="test", event_id="evt-1", customer_id="cust-1", deadline_seconds=0.001)
         time.sleep(0.01)
         assert ctx.is_past_deadline() is True
 
     def test_remaining_time_seconds(self):
-        ctx = RunContext.create(use_case="test", deadline_seconds=10.0)
+        ctx = RunContext.create(workflow="test", event_id="evt-1", customer_id="cust-1", deadline_seconds=10.0)
         remaining = ctx.remaining_time_seconds()
         assert remaining is not None
         assert 9.0 < remaining <= 10.0
@@ -113,7 +122,7 @@ class TestRunContextCancellation:
     """Tests for cancellation handling."""
 
     def test_request_cancellation(self):
-        ctx = RunContext.create(use_case="test")
+        ctx = RunContext.create(workflow="test", event_id="evt-1", customer_id="cust-1")
         assert ctx.is_cancelled() is False
 
         ctx.request_cancellation("user")
@@ -125,7 +134,7 @@ class TestRunContextOutcome:
     """Tests for outcome recording."""
 
     def test_complete_sets_outcome(self):
-        ctx = RunContext.create(use_case="test")
+        ctx = RunContext.create(workflow="test", event_id="evt-1", customer_id="cust-1")
         ctx.complete(
             status=RunStatus.SUCCESS,
             value_type="tickets_resolved",
@@ -144,47 +153,54 @@ class TestRunContextSerialization:
     def test_to_baggage_dict_lean_mode(self):
         with mock.patch.dict(os.environ, {"BOTANU_PROPAGATION_MODE": "lean"}):
             ctx = RunContext.create(
-                use_case="Customer Support",
-                workflow="handle_ticket",
+                workflow="Customer Support",
+                event_id="ticket-42",
+                customer_id="bigretail",
                 tenant_id="tenant-123",
             )
             baggage = ctx.to_baggage_dict()
 
-            # Lean mode only includes run_id and use_case
+            # Lean mode includes run_id, workflow, event_id, customer_id
             assert "botanu.run_id" in baggage
-            assert "botanu.use_case" in baggage
-            assert "botanu.workflow" not in baggage
+            assert "botanu.workflow" in baggage
+            assert baggage["botanu.event_id"] == "ticket-42"
+            assert baggage["botanu.customer_id"] == "bigretail"
             assert "botanu.tenant_id" not in baggage
 
     def test_to_baggage_dict_full_mode(self):
         with mock.patch.dict(os.environ, {"BOTANU_PROPAGATION_MODE": "full"}):
             ctx = RunContext.create(
-                use_case="Customer Support",
-                workflow="handle_ticket",
+                workflow="Customer Support",
+                event_id="ticket-42",
+                customer_id="bigretail",
                 tenant_id="tenant-123",
             )
             baggage = ctx.to_baggage_dict()
 
-            assert baggage["botanu.workflow"] == "handle_ticket"
+            assert baggage["botanu.event_id"] == "ticket-42"
+            assert baggage["botanu.customer_id"] == "bigretail"
             assert baggage["botanu.tenant_id"] == "tenant-123"
 
     def test_to_span_attributes(self):
         ctx = RunContext.create(
-            use_case="Customer Support",
-            workflow="handle_ticket",
+            workflow="Customer Support",
+            event_id="ticket-42",
+            customer_id="bigretail",
             tenant_id="tenant-123",
         )
         attrs = ctx.to_span_attributes()
 
         assert attrs["botanu.run_id"] == ctx.run_id
-        assert attrs["botanu.use_case"] == "Customer Support"
-        assert attrs["botanu.workflow"] == "handle_ticket"
+        assert attrs["botanu.workflow"] == "Customer Support"
+        assert attrs["botanu.event_id"] == "ticket-42"
+        assert attrs["botanu.customer_id"] == "bigretail"
         assert attrs["botanu.tenant_id"] == "tenant-123"
 
     def test_from_baggage_roundtrip(self):
         original = RunContext.create(
-            use_case="test",
-            workflow="my_workflow",
+            workflow="test",
+            event_id="ticket-42",
+            customer_id="bigretail",
             tenant_id="tenant-abc",
         )
         baggage = original.to_baggage_dict(lean_mode=False)
@@ -192,8 +208,9 @@ class TestRunContextSerialization:
 
         assert restored is not None
         assert restored.run_id == original.run_id
-        assert restored.use_case == original.use_case
         assert restored.workflow == original.workflow
+        assert restored.event_id == original.event_id
+        assert restored.customer_id == original.customer_id
         assert restored.tenant_id == original.tenant_id
 
     def test_from_baggage_returns_none_for_missing_fields(self):
