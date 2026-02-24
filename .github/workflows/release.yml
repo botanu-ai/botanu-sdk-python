@@ -95,7 +95,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/p/botanu
+      url: https://pypi.org/botanu
     permissions:
       id-token: write  # required for OIDC trusted publishing
     steps:
