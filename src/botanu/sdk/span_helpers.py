@@ -63,7 +63,7 @@ def emit_outcome(
 
     span = trace.get_current_span()
 
-    span.set_attribute("botanu.outcome", status)
+    span.set_attribute("botanu.outcome.status", status)
 
     if value_type:
         span.set_attribute("botanu.outcome.value_type", value_type)

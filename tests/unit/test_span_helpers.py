@@ -20,7 +20,7 @@ class TestEmitOutcome:
 
         spans = memory_exporter.get_finished_spans()
         attrs = dict(spans[0].attributes)
-        assert attrs.get("botanu.outcome") == "success"
+        assert attrs.get("botanu.outcome.status") == "success"
 
     def test_emit_failure_outcome(self, memory_exporter):
         tracer = trace.get_tracer("test")
@@ -29,7 +29,7 @@ class TestEmitOutcome:
 
         spans = memory_exporter.get_finished_spans()
         attrs = dict(spans[0].attributes)
-        assert attrs.get("botanu.outcome") == "failed"
+        assert attrs.get("botanu.outcome.status") == "failed"
         assert attrs.get("botanu.outcome.reason") == "timeout"
 
     def test_emit_outcome_with_value(self, memory_exporter):
@@ -43,7 +43,7 @@ class TestEmitOutcome:
 
         spans = memory_exporter.get_finished_spans()
         attrs = dict(spans[0].attributes)
-        assert attrs.get("botanu.outcome") == "success"
+        assert attrs.get("botanu.outcome.status") == "success"
         assert attrs.get("botanu.outcome.value_type") == "tickets_resolved"
         assert attrs.get("botanu.outcome.value_amount") == 5.0
 
