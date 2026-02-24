@@ -1,9 +1,9 @@
-# Botanu SDK for Python
+# botanu SDK for Python
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
 
-
-Event-level cost attribution for AI workflows, built on [OpenTelemetry](https://opentelemetry.io/).
+[botanu](https://botanu.ai/) is platform that helps AI companies understand the real cost of their AI features per customer, enabling outcome-based pricing and smarter scaling.
+This SDK is built on [OpenTelemetry](https://opentelemetry.io/) for event-level cost attribution for AI workflow. For more email- deborah@botanu.ai
 
 An **event** is one business transaction — resolving a support ticket, processing
 an order, generating a report. Each event may involve multiple **runs** (LLM calls,
@@ -90,6 +90,7 @@ Current maintainers are listed in [MAINTAINERS.md](./MAINTAINERS.md).
 To report a security vulnerability, please use
 [GitHub Security Advisories](https://github.com/botanu-ai/botanu-sdk-python/security/advisories/new)
 or see [SECURITY.md](./SECURITY.md) for full details. **Do not file a public issue.**
+
 
 ## Code of Conduct
 
