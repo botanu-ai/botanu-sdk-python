@@ -78,8 +78,9 @@ class BotanuConfig:
 
     # Span export
     max_export_batch_size: int = 512
-    max_queue_size: int = 2048
+    max_queue_size: int = 65536
     schedule_delay_millis: int = 5000
+    export_timeout_millis: int = 30000
 
     # Propagation mode
     propagation_mode: str = "lean"    # BOTANU_PROPAGATION_MODE
@@ -180,7 +181,9 @@ config = BotanuConfig()
 Propagates only essential fields to minimize header size:
 
 - `botanu.run_id`
-- `botanu.use_case`
+- `botanu.workflow`
+- `botanu.event_id`
+- `botanu.customer_id`
 
 Best for high-traffic systems where header size matters.
 
@@ -189,8 +192,9 @@ Best for high-traffic systems where header size matters.
 Propagates all context fields:
 
 - `botanu.run_id`
-- `botanu.use_case`
 - `botanu.workflow`
+- `botanu.event_id`
+- `botanu.customer_id`
 - `botanu.environment`
 - `botanu.tenant_id`
 - `botanu.parent_run_id`
@@ -199,12 +203,6 @@ Enable with:
 
 ```bash
 export BOTANU_PROPAGATION_MODE=full
-```
-
-Or:
-
-```python
-enable(service_name="my-service", propagation_mode="full")
 ```
 
 ## Auto-Instrumentation
@@ -234,22 +232,20 @@ By default, Botanu enables instrumentation for:
 
 ### Customizing Packages
 
+Override the default list via `BotanuConfig`:
+
 ```python
 from botanu import enable
+from botanu.sdk.config import BotanuConfig
 
-enable(
-    service_name="my-service",
-    auto_instrument_packages=["requests", "fastapi", "openai_v2"],
-)
+config = BotanuConfig(auto_instrument_packages=["requests", "fastapi", "openai_v2"])
+enable(config=config)
 ```
 
 ### Disabling Auto-Instrumentation
 
 ```python
-enable(
-    service_name="my-service",
-    auto_instrument_packages=[],  # Empty list disables
-)
+enable(auto_instrumentation=False)
 ```
 
 ## Exporting Configuration

@@ -30,56 +30,6 @@ Heavy operations happen in the OTel Collector:
 - Cardinality management
 - Aggregation and sampling
 
-## Component Overview
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              Your Application                                │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐         │
-│  │  @botanu_use_   │    │  track_llm_     │    │  track_db_      │         │
-│  │  case()         │    │  call()         │    │  operation()    │         │
-│  └────────┬────────┘    └────────┬────────┘    └────────┬────────┘         │
-│           │                      │                      │                   │
-│           └──────────────────────┼──────────────────────┘                   │
-│                                  │                                          │
-│                                  ▼                                          │
-│  ┌───────────────────────────────────────────────────────────────────────┐ │
-│  │                        Botanu SDK Core                                 │ │
-│  ├───────────────────────────────────────────────────────────────────────┤ │
-│  │  RunContext          │  RunContextEnricher   │  BotanuConfig          │ │
-│  │  - generate_run_id() │  - on_start()         │  - service_name        │ │
-│  │  - to_baggage_dict() │  - reads baggage      │  - otlp_endpoint       │ │
-│  │  - to_span_attrs()   │  - writes to spans    │  - propagation_mode    │ │
-│  └───────────────────────────────────────────────────────────────────────┘ │
-│                                  │                                          │
-│                                  ▼                                          │
-│  ┌───────────────────────────────────────────────────────────────────────┐ │
-│  │                     OpenTelemetry SDK                                  │ │
-│  │  TracerProvider → BatchSpanProcessor → OTLPSpanExporter               │ │
-│  └───────────────────────────────────────────────────────────────────────┘ │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                   │
-                                   │ OTLP (HTTP or gRPC)
-                                   ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         OpenTelemetry Collector                              │
-├─────────────────────────────────────────────────────────────────────────────┤
-│  receivers:                                                                  │
-│    otlp:                                                                     │
-│                                                                              │
-│  processors:                                                                 │
-│    transform:           # Normalize vendor names                            │
-│    redaction:           # Remove PII from gen_ai.content.*                  │
-│    attributes:          # Cardinality limits                                │
-│    botanu/cost:         # Calculate $ from tokens                           │
-│                                                                              │
-│  exporters:                                                                  │
-│    clickhouse:          # Or your preferred backend                         │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
 
 ## SDK Components
 
@@ -106,8 +56,9 @@ Holds run metadata and provides serialization:
 class RunContext:
     run_id: str
     root_run_id: str
-    use_case: str
-    workflow: Optional[str]
+    workflow: str
+    event_id: str
+    customer_id: str
     attempt: int
     # ...
 ```
@@ -139,8 +90,8 @@ Context managers for manual instrumentation:
 ### 1. Run Initiation
 
 ```python
-@botanu_use_case("Customer Support")
-def handle_ticket():
+@botanu_workflow("process", event_id="evt-001", customer_id="cust-42")
+def do_work():
     pass
 ```
 
@@ -241,8 +192,8 @@ from opentelemetry.instrumentation.requests import RequestsInstrumentor
 RequestsInstrumentor().instrument()
 
 # Add Botanu
-from botanu import init_botanu
-init_botanu(service_name="my-service")
+from botanu import enable
+enable(service_name="my-service")
 
 # Both work together - requests are instrumented AND get run_id
 ```

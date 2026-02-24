@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Initial open-source release under Apache-2.0 license
 - **Core SDK**
   - `enable()` / `disable()` bootstrap functions for SDK initialization
-  - `@botanu_use_case` decorator with UUIDv7 run_id generation
+  - `@botanu_workflow` decorator with UUIDv7 run_id generation
   - `@botanu_outcome` decorator for sub-function outcome tracking
   - `emit_outcome()` helper for recording business outcomes
   - `set_business_context()` for cost attribution dimensions

@@ -10,78 +10,78 @@ Common mistakes to avoid when using Botanu SDK.
 
 ```python
 # BAD - Too many runs
-@botanu_use_case("Fetch Context")  # Don't do this
-async def fetch_context(ticket_id):
+@botanu_workflow("fetch_data", event_id=event_id, customer_id=customer_id)  # Don't do this
+async def fetch_data(event_id, customer_id):
     return await db.query(...)
 
-@botanu_use_case("Generate Response")  # Or this
-async def generate_response(context):
+@botanu_workflow("do_work", event_id=event_id, customer_id=customer_id)  # Or this
+async def do_work(event_id, customer_id):
     return await llm.complete(...)
 
-@botanu_use_case("Customer Support")
-async def handle_ticket(ticket_id):
-    context = await fetch_context(ticket_id)
-    response = await generate_response(context)
-    return response
+@botanu_workflow("handle_request", event_id=event_id, customer_id=customer_id)
+async def handle_request(event_id, customer_id):
+    data = await fetch_data(event_id, customer_id)
+    result = await do_work(event_id, customer_id)
+    return result
 ```
 
 **Do** use a single run at the entry point:
 
 ```python
 # GOOD - One run for the business outcome
-@botanu_use_case("Customer Support")
-async def handle_ticket(ticket_id):
-    context = await fetch_context(ticket_id)  # Not decorated
-    response = await generate_response(context)  # Not decorated
-    emit_outcome("success", value_type="tickets_resolved", value_amount=1)
-    return response
+@botanu_workflow("handle_request", event_id=event_id, customer_id=customer_id)
+async def handle_request(event_id: str, customer_id: str):
+    data = await fetch_data(event_id)  # Not decorated
+    result = await do_work(data)  # Not decorated
+    emit_outcome("success", value_type="requests_processed", value_amount=1)
+    return result
 ```
 
-### Nesting @botanu_use_case Decorators
+### Nesting @botanu_workflow Decorators
 
-**Don't** nest use case decorators:
+**Don't** nest workflow decorators:
 
 ```python
 # BAD - Nested runs create confusion
-@botanu_use_case("Outer")
+@botanu_workflow("outer", event_id=event_id, customer_id=customer_id)
 async def outer():
     await inner()  # Creates a second run
 
-@botanu_use_case("Inner")  # Don't do this
+@botanu_workflow("inner", event_id=event_id, customer_id=customer_id)  # Don't do this
 async def inner():
     ...
 ```
 
-**Do** use @botanu_use_case only at entry points:
+**Do** use @botanu_workflow only at entry points:
 
 ```python
 # GOOD - Only entry point is decorated
-@botanu_use_case("Main Workflow")
-async def main():
+@botanu_workflow("main_flow", event_id=event_id, customer_id=customer_id)
+async def main_flow():
     await step_one()  # No decorator
     await step_two()  # No decorator
 ```
 
-### Generic Use Case Names
+### Generic Workflow Names
 
 **Don't** use vague names:
 
 ```python
 # BAD - Meaningless in dashboards
-@botanu_use_case("Process")
-@botanu_use_case("Handle")
-@botanu_use_case("Main")
-@botanu_use_case("DoWork")
+@botanu_workflow("process", event_id=event_id, customer_id=customer_id)
+@botanu_workflow("handle", event_id=event_id, customer_id=customer_id)
+@botanu_workflow("main", event_id=event_id, customer_id=customer_id)
+@botanu_workflow("do_work", event_id=event_id, customer_id=customer_id)
 ```
 
 **Do** use descriptive business names:
 
 ```python
 # GOOD - Clear in reports
-@botanu_use_case("Customer Support")
-@botanu_use_case("Invoice Processing")
-@botanu_use_case("Lead Qualification")
-@botanu_use_case("Document Analysis")
+@botanu_workflow("support_resolution", event_id=event_id, customer_id=customer_id)
+@botanu_workflow("invoice_processing", event_id=event_id, customer_id=customer_id)
+@botanu_workflow("lead_scoring", event_id=event_id, customer_id=customer_id)
+@botanu_workflow("document_analysis", event_id=event_id, customer_id=customer_id)
 ```
 
 ## Outcome Anti-Patterns
@@ -92,8 +92,8 @@ async def main():
 
 ```python
 # BAD - No outcome recorded
-@botanu_use_case("Process Order")
-async def process_order(order_id):
+@botanu_workflow("process_order", event_id=order_id, customer_id=customer_id)
+async def process_order(order_id, customer_id):
     result = await process(order_id)
     return result  # Where's the outcome?
 ```
@@ -102,8 +102,8 @@ async def process_order(order_id):
 
 ```python
 # GOOD - Explicit outcome
-@botanu_use_case("Process Order")
-async def process_order(order_id):
+@botanu_workflow("process_order", event_id=order_id, customer_id=customer_id)
+async def process_order(order_id, customer_id):
     try:
         result = await process(order_id)
         emit_outcome("success", value_type="orders_processed", value_amount=1)
@@ -119,7 +119,7 @@ async def process_order(order_id):
 
 ```python
 # BAD - Multiple outcomes are confusing
-@botanu_use_case("Batch Processing")
+@botanu_workflow("batch_processing", event_id=batch_id, customer_id=customer_id)
 async def process_batch(items):
     for item in items:
         await process(item)
@@ -130,7 +130,7 @@ async def process_batch(items):
 
 ```python
 # GOOD - One outcome at the end
-@botanu_use_case("Batch Processing")
+@botanu_workflow("batch_processing", event_id=batch_id, customer_id=customer_id)
 async def process_batch(items):
     processed = 0
     for item in items:
@@ -270,21 +270,15 @@ enable(service_name=os.environ["OTEL_SERVICE_NAME"])
 # BAD - Missing automatic tracing
 enable(
     service_name="my-service",
-    auto_instrument_packages=[],  # Why?
+    auto_instrumentation=False,  # Why?
 )
 ```
 
 **Do** keep defaults or be selective:
 
 ```python
-# GOOD - Default instrumentation
+# GOOD - Default instrumentation (auto_instrumentation=True by default)
 enable(service_name="my-service")
-
-# Or selective
-enable(
-    service_name="my-service",
-    auto_instrument_packages=["fastapi", "openai_v2", "sqlalchemy"],
-)
 ```
 
 ## Context Propagation Anti-Patterns
@@ -295,12 +289,12 @@ enable(
 
 ```python
 # BAD - Context lost
-@botanu_use_case("Parallel Processing")
-async def process():
+@botanu_workflow("parallel_work", event_id=event_id, customer_id=customer_id)
+async def do_parallel_work():
     # These tasks don't inherit context
     await asyncio.gather(
-        task_one(),
-        task_two(),
+        do_something(),
+        do_something_else(),
     )
 ```
 
@@ -308,12 +302,12 @@ async def process():
 
 ```python
 # GOOD - Context flows through asyncio
-@botanu_use_case("Parallel Processing")
-async def process():
+@botanu_workflow("parallel_work", event_id=event_id, customer_id=customer_id)
+async def do_parallel_work():
     # asyncio with contextvars works correctly
     await asyncio.gather(
-        task_one(),  # Inherits context
-        task_two(),  # Inherits context
+        do_something(),  # Inherits context
+        do_something_else(),  # Inherits context
     )
 ```
 
@@ -325,19 +319,20 @@ async def process():
 # BAD - Context not extracted
 def process_message(message):
     # run_id from producer is lost
-    handle_payload(message["payload"])
+    do_work(message["payload"])
 ```
 
 **Do** extract and use context:
 
 ```python
 # GOOD - Context continues
+from botanu.sdk import set_baggage
+
 def process_message(message):
     baggage = message.get("baggage", {})
-    ctx = RunContext.from_baggage(baggage)
-    if ctx:
-        with ctx.as_current():
-            handle_payload(message["payload"])
+    for key, value in baggage.items():
+        set_baggage(key, value)
+    do_work(message["payload"])
 ```
 
 ## Data Tracking Anti-Patterns
@@ -348,8 +343,8 @@ def process_message(message):
 
 ```python
 # BAD - Only LLM tracked
-@botanu_use_case("Analysis")
-async def analyze():
+@botanu_workflow("analyze_data", event_id=event_id, customer_id=customer_id)
+async def analyze_data():
     data = await snowflake.query(expensive_query)  # Not tracked!
     with track_llm_call(...) as tracker:
         result = await llm.complete(data)
@@ -360,8 +355,8 @@ async def analyze():
 
 ```python
 # GOOD - Complete cost picture
-@botanu_use_case("Analysis")
-async def analyze():
+@botanu_workflow("analyze_data", event_id=event_id, customer_id=customer_id)
+async def analyze_data():
     with track_db_operation(system="snowflake", operation="SELECT") as db:
         data = await snowflake.query(expensive_query)
         db.set_bytes_scanned(data.bytes_scanned)
@@ -426,7 +421,7 @@ with track_llm_call(...) as tracker:
 
 ```python
 # BAD - All items fail if one fails
-@botanu_use_case("Batch")
+@botanu_workflow("batch_work", event_id=batch_id, customer_id=customer_id)
 async def process_batch(items):
     for item in items:
         await process(item)  # If one fails, no outcome
@@ -437,7 +432,7 @@ async def process_batch(items):
 
 ```python
 # GOOD - Partial success recorded
-@botanu_use_case("Batch")
+@botanu_workflow("batch_work", event_id=batch_id, customer_id=customer_id)
 async def process_batch(items):
     processed = 0
     failed = 0
@@ -467,7 +462,7 @@ async def process_batch(items):
 # BAD - Tests hit real collector
 def test_workflow():
     enable(service_name="test")  # Sends to real endpoint!
-    await my_workflow()
+    await do_work()
 ```
 
 **Do** use NoOp or in-memory exporters:
@@ -480,7 +475,7 @@ def setup_test():
     trace.set_tracer_provider(NoOpTracerProvider())
 
 def test_workflow():
-    await my_workflow()  # No external calls
+    await do_work()  # No external calls
 ```
 
 ## See Also

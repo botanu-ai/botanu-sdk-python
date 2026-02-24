@@ -179,10 +179,10 @@ class RunContextEnricher(SpanProcessor):
         if run_id:
             span.set_attribute("botanu.run_id", run_id)
 
-        # Read use_case from baggage
-        use_case = baggage.get_baggage("botanu.use_case", parent_context)
-        if use_case:
-            span.set_attribute("botanu.use_case", use_case)
+        # Read workflow from baggage
+        workflow = baggage.get_baggage("botanu.workflow", parent_context)
+        if workflow:
+            span.set_attribute("botanu.workflow", workflow)
 ```
 
 This means:
@@ -195,16 +195,15 @@ This means:
 With the enricher in place, use Botanu decorators:
 
 ```python
-from botanu import botanu_use_case, emit_outcome
+from botanu import botanu_workflow, emit_outcome
 
-@botanu_use_case("Customer Support")
-async def handle_ticket(ticket_id: str):
+@botanu_workflow("do_work", event_id=event_id, customer_id=customer_id)
+async def do_work(event_id: str, customer_id: str):
     # All spans created here (by any instrumentation) get run_id
-    context = requests.get(f"/api/tickets/{ticket_id}")
-    response = await openai_call(context)
-    await database.save(response)
+    data = do_something()
+    result = await process(data)
 
-    emit_outcome("success", value_type="tickets_resolved", value_amount=1)
+    emit_outcome("success")
 ```
 
 ## Without Botanu Bootstrap
@@ -233,7 +232,7 @@ Check that run_id appears on spans:
 ```python
 from opentelemetry import trace, baggage, context
 
-# Set baggage (normally done by @botanu_use_case)
+# Set baggage (normally done by @botanu_workflow)
 ctx = baggage.set_baggage("botanu.run_id", "test-123")
 token = context.attach(ctx)
 
@@ -276,7 +275,7 @@ However, `RunContextEnricher` uses `on_start()`, so it runs before export regard
    print(baggage.get_baggage("botanu.run_id"))
    ```
 
-3. Ensure `@botanu_use_case` is used at entry points
+3. Ensure `@botanu_workflow` is used at entry points
 
 ### Baggage Not Propagating
 

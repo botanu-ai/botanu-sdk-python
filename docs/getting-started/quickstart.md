@@ -1,6 +1,6 @@
 # Quickstart
 
-Get run-level cost attribution working in 5 minutes.
+Get event-level cost attribution working in 5 minutes.
 
 ## Prerequisites
 
@@ -41,33 +41,35 @@ Call `enable()` once at application startup. It reads configuration from environ
 ## Step 4: Define Entry Point
 
 ```python
-from botanu import botanu_use_case
+from botanu import botanu_workflow
 
-@botanu_use_case(name="Customer Support")
-async def handle_ticket(ticket_id: str):
-    data = await db.query(ticket_id)
+@botanu_workflow("my-workflow", event_id="evt-001", customer_id="cust-42")
+async def do_work():
+    data = await db.query(...)
     result = await llm.complete(data)
     return result
 ```
 
-All LLM calls, database queries, and HTTP requests inside the function are automatically tracked with the same `run_id`.
+All LLM calls, database queries, and HTTP requests inside the function are automatically tracked with the same `run_id` tied to the `event_id`.
 
 ## Complete Example
 
 **Entry service** (`entry/app.py`):
 
 ```python
-from botanu import enable, botanu_use_case
+from botanu import enable, botanu_workflow, emit_outcome
 
 enable()
 
-@botanu_use_case(name="Customer Support")
-async def handle_ticket(ticket_id: str):
-    data = await db.query(ticket_id)
-    result = await openai.chat.completions.create(
-        model="gpt-4",
-        messages=[{"role": "user", "content": data}]
-    )
+@botanu_workflow(
+    "my-workflow",
+    event_id=lambda req: req.event_id,
+    customer_id=lambda req: req.customer_id,
+)
+async def handle_request(req):
+    data = await fetch_data(req)
+    result = await process(data)
+    emit_outcome("success")
     return result
 ```
 
@@ -84,12 +86,14 @@ enable()  # propagates run_id from incoming request — no decorator needed
 | Attribute | Example | Description |
 |-----------|---------|-------------|
 | `botanu.run_id` | `019abc12-...` | Unique run identifier (UUIDv7) |
-| `botanu.use_case` | `Customer Support` | Business use case |
+| `botanu.workflow` | `my-workflow` | Workflow name |
+| `botanu.event_id` | `evt-001` | Business event identifier |
+| `botanu.customer_id` | `cust-42` | Customer identifier |
 | `gen_ai.usage.input_tokens` | `150` | LLM input tokens |
 | `gen_ai.usage.output_tokens` | `200` | LLM output tokens |
 | `db.system` | `postgresql` | Database system |
 
-All spans across all services share the same `run_id`, enabling cost-per-transaction analytics.
+All spans across all services share the same `run_id`, enabling cost-per-event analytics.
 
 ## Next Steps
 

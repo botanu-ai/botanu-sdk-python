@@ -1,138 +1,60 @@
 # Botanu SDK for Python
 
+[![CI](https://github.com/botanu-ai/botanu-sdk-python/actions/workflows/ci.yml/badge.svg)](https://github.com/botanu-ai/botanu-sdk-python/actions/workflows/ci.yml)
 [![PyPI version](https://img.shields.io/pypi/v/botanu)](https://pypi.org/project/botanu/)
-[![Python](https://img.shields.io/badge/python-3.9%20|%203.10%20|%203.11%20|%203.12%20|%203.13-blue)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/python-3.9%2B-blue)](https://www.python.org/)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
 
-**Run-level cost attribution for AI workflows, built on OpenTelemetry.**
 
-Botanu adds **runs** on top of distributed tracing. A run represents one business transaction that may span multiple LLM calls, database queries, and microservices. By correlating every operation to a stable `run_id`, you get per-transaction cost attribution without sampling artifacts.
+Event-level cost attribution for AI workflows, built on [OpenTelemetry](https://opentelemetry.io/).
 
-## How It Works
+An **event** is one business transaction — resolving a support ticket, processing
+an order, generating a report. Each event may involve multiple **runs** (LLM calls,
+retries, sub-workflows) across multiple services. By correlating every run to a
+stable `event_id`, Botanu gives you per-event cost attribution and outcome
+tracking without sampling artifacts.
 
-```
-User Request
-    |
-    v
-  Entry Service          Intermediate Service         LLM / DB
-  @botanu_use_case  -->  enable() propagates   -->  auto-instrumented
-  creates run_id         run_id via W3C Baggage      spans tagged with run_id
-```
-
-1. **Entry point** creates a `run_id` with `@botanu_use_case`
-2. **Every service** calls `enable()` to propagate the `run_id` via W3C Baggage
-3. **All spans** across all services share the same `run_id`
-4. **Traces export** to your OTel Collector via OTLP (configured by environment variable)
-
-## Quick Start
-
-### Install
+## Getting Started
 
 ```bash
 pip install botanu
 ```
 
-One install. Includes OTel SDK, OTLP exporter, and auto-instrumentation for 50+ libraries.
-
-### Instrument Your Code
-
-**Entry service** (where the workflow begins):
+One install. Includes OTel SDK, OTLP exporter, and auto-instrumentation for
+50+ libraries.
 
 ```python
-from botanu import enable, botanu_use_case
+from botanu import enable, botanu_workflow, emit_outcome
 
-enable()  # reads config from env vars
+enable()  # reads config from environment variables
 
-@botanu_use_case(name="Customer Support")
-async def handle_ticket(ticket_id: str):
-    data = await db.query(ticket_id)
-    result = await llm.complete(data)
+@botanu_workflow("my-workflow", event_id="evt-001", customer_id="cust-42")
+async def do_work():
+    result = await do_something()
+    emit_outcome("success")
     return result
 ```
 
-**Every other service** (intermediate, downstream):
+Entry points use `@botanu_workflow`. Every other service only needs `enable()`.
+All configuration is via environment variables — zero hardcoded values in code.
 
-```python
-from botanu import enable
-
-enable()  # propagates run_id from incoming request
-```
-
-That's it. No collector endpoint in code. No manual span creation.
-
-### Configure via Environment Variables
-
-All configuration is via environment variables. **Zero hardcoded values in code.**
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | Collector endpoint | `http://localhost:4318` |
-| `OTEL_SERVICE_NAME` | Service name | `unknown_service` |
-| `BOTANU_ENVIRONMENT` | Deployment environment | `production` |
-
-```yaml
-# docker-compose.yml / Kubernetes deployment
-environment:
-  - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
-  - OTEL_SERVICE_NAME=my-service
-```
-
-See [Configuration Reference](./docs/getting-started/configuration.md) for all options.
-
-## Auto-Instrumentation
-
-Everything is included and auto-detected. If the library is in your dependencies, it gets instrumented:
-
-| Category | Libraries |
-|----------|-----------|
-| **LLM Providers** | OpenAI, Anthropic, Vertex AI, Google GenAI, LangChain, Ollama, CrewAI |
-| **Web Frameworks** | FastAPI, Flask, Django, Starlette, Falcon, Pyramid, Tornado |
-| **HTTP Clients** | requests, httpx, urllib3, aiohttp |
-| **Databases** | PostgreSQL (psycopg2/3, asyncpg), MySQL, SQLite, MongoDB, Redis, SQLAlchemy, Elasticsearch, Cassandra |
-| **Messaging** | Celery, Kafka, RabbitMQ (pika) |
-| **AWS** | botocore, boto3 (SQS) |
-| **gRPC** | Client + Server |
-| **Runtime** | logging, threading, asyncio |
-
-No manual instrumentation required. Libraries not installed are silently skipped.
-
-## Kubernetes at Scale
-
-For large deployments (2000+ services), only entry points need code changes:
-
-| Service Type | Code Change | Configuration |
-|--------------|-------------|---------------|
-| Entry point | `@botanu_use_case` decorator | `OTEL_EXPORTER_OTLP_ENDPOINT` env var |
-| Intermediate | `enable()` call only | `OTEL_EXPORTER_OTLP_ENDPOINT` env var |
-
-See [Kubernetes Deployment Guide](./docs/integration/kubernetes.md) for details.
-
-## Architecture
-
-```
-                    +---------+     +---------+     +---------+
-                    | Service | --> | Service | --> | Service |
-                    | enable()| --> | enable()| --> | enable()|
-                    +---------+     +---------+     +---------+
-                         |               |               |
-                         v               v               v
-                    +-------------------------------------+
-                    |       OTel Collector (OTLP)         |
-                    +-------------------------------------+
-                         |               |               |
-                         v               v               v
-                    Jaeger/Tempo   Prometheus   Your Backend
-```
-
-The SDK is a thin layer on OpenTelemetry:
-- **SDK**: Generates `run_id`, propagates context, auto-instruments
-- **Collector**: PII redaction, cardinality limits, routing, vendor enrichment
+See the [Quick Start](./docs/getting-started/quickstart.md) guide for a full walkthrough.
 
 ## Documentation
 
-- [Getting Started](./docs/getting-started/) - Installation, quickstart, configuration
-- [Concepts](./docs/concepts/) - Runs, context propagation, cost attribution
-- [Integration](./docs/integration/) - Auto-instrumentation, Kubernetes, collector setup
-- [API Reference](./docs/api/) - `enable()`, `@botanu_use_case`, `emit_outcome()`
+| Topic | Description |
+|-------|-------------|
+| [Installation](./docs/getting-started/installation.md) | Install and configure the SDK |
+| [Quick Start](./docs/getting-started/quickstart.md) | Get up and running in 5 minutes |
+| [Configuration](./docs/getting-started/configuration.md) | Environment variables and options |
+| [Core Concepts](./docs/concepts/) | Events, runs, context propagation, architecture |
+| [LLM Tracking](./docs/tracking/llm-tracking.md) | Track model calls and token usage |
+| [Data Tracking](./docs/tracking/data-tracking.md) | Database, storage, and messaging |
+| [Outcomes](./docs/tracking/outcomes.md) | Record business outcomes for ROI |
+| [Auto-Instrumentation](./docs/integration/auto-instrumentation.md) | Supported libraries and frameworks |
+| [Kubernetes](./docs/integration/kubernetes.md) | Zero-code instrumentation at scale |
+| [API Reference](./docs/api/) | Decorators, tracking API, configuration |
+| [Best Practices](./docs/patterns/best-practices.md) | Recommended patterns |
 
 ## Requirements
 
@@ -141,16 +63,44 @@ The SDK is a thin layer on OpenTelemetry:
 
 ## Contributing
 
-We welcome contributions. See [CONTRIBUTING.md](./CONTRIBUTING.md).
+We welcome contributions from the community. Please read our
+[Contributing Guide](./CONTRIBUTING.md) before submitting a pull request.
 
-This project follows the [Developer Certificate of Origin (DCO)](https://developercertificate.org/). Sign off your commits:
+This project requires [DCO sign-off](https://developercertificate.org/) on all
+commits:
 
 ```bash
 git commit -s -m "Your commit message"
 ```
 
+Looking for a place to start? Check the
+[good first issues](https://github.com/botanu-ai/botanu-sdk-python/labels/good%20first%20issue).
+
+## Community
+
+- [GitHub Discussions](https://github.com/botanu-ai/botanu-sdk-python/discussions) — questions, ideas, show & tell
+- [GitHub Issues](https://github.com/botanu-ai/botanu-sdk-python/issues) — bug reports and feature requests
+
+## Governance
+
+See [GOVERNANCE.md](./GOVERNANCE.md) for details on roles, decision-making,
+and the contributor ladder.
+
+Current maintainers are listed in [MAINTAINERS.md](./MAINTAINERS.md).
+
+## Security
+
+To report a security vulnerability, please use
+[GitHub Security Advisories](https://github.com/botanu-ai/botanu-sdk-python/security/advisories/new)
+or see [SECURITY.md](./SECURITY.md) for full details. **Do not file a public issue.**
+
+## Code of Conduct
+
+This project follows the
+[LF Projects Code of Conduct](https://lfprojects.org/policies/code-of-conduct/).
+See [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md).
+
 ## License
 
-[Apache-2.0](./LICENSE)
+[Apache License 2.0](./LICENSE)
 
-This project is an [LF AI & Data Foundation](https://lfaidata.foundation/) project.

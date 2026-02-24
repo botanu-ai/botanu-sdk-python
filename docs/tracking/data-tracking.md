@@ -303,7 +303,7 @@ set_warehouse_metrics(
 ## Example: Complete Data Pipeline
 
 ```python
-from botanu import botanu_use_case, emit_outcome
+from botanu import botanu_workflow, emit_outcome
 from botanu.tracking.data import (
     track_db_operation,
     track_storage_operation,
@@ -312,7 +312,7 @@ from botanu.tracking.data import (
 )
 from botanu.tracking.llm import track_llm_call
 
-@botanu_use_case("ETL Pipeline")
+@botanu_workflow("etl-pipeline", event_id=batch_id, customer_id=customer_id)
 async def process_batch(batch_id: str):
     """Complete ETL pipeline with cost tracking."""
 

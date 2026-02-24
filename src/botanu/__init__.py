@@ -43,7 +43,7 @@ from botanu.sdk.context import (
 )
 
 # Decorators  (primary integration point)
-from botanu.sdk.decorators import botanu_outcome, botanu_workflow, run_botanu, workflow
+from botanu.sdk.decorators import botanu_workflow, run_botanu, workflow
 
 # Span helpers
 from botanu.sdk.span_helpers import emit_outcome, set_business_context
@@ -60,7 +60,6 @@ __all__ = [
     "botanu_workflow",
     "run_botanu",
     "workflow",
-    "botanu_outcome",
     # Span helpers
     "emit_outcome",
     "set_business_context",

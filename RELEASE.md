@@ -94,7 +94,7 @@ python -c "import botanu; print(botanu.__version__)"
 
 # Run quick test
 python -c "
-from botanu import enable, botanu_use_case
+from botanu import enable, botanu_workflow
 enable(service_name='test')
 print('Botanu SDK loaded successfully!')
 "
