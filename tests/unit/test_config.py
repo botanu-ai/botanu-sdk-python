@@ -346,6 +346,51 @@ class TestBotanuConfigPrecedence:
                 assert config.auto_detect_resources is True
 
 
+class TestBotanuApiKeyAutoConfig:
+    """Tests for BOTANU_API_KEY auto-configuring endpoint and auth header."""
+
+    def test_api_key_auto_endpoint(self):
+        with mock.patch.dict(
+            os.environ,
+            {"BOTANU_API_KEY": "btnu_live_test"},
+            clear=False,
+        ):
+            os.environ.pop("BOTANU_COLLECTOR_ENDPOINT", None)
+            os.environ.pop("OTEL_EXPORTER_OTLP_ENDPOINT", None)
+            os.environ.pop("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", None)
+            config = BotanuConfig()
+            assert config.otlp_endpoint == "https://ingest.botanu.ai:4318"
+
+    def test_api_key_auto_header(self):
+        with mock.patch.dict(os.environ, {"BOTANU_API_KEY": "btnu_live_test"}):
+            config = BotanuConfig()
+            assert config.otlp_headers == {"Authorization": "Bearer btnu_live_test"}
+
+    def test_explicit_endpoint_overrides_api_key(self):
+        with mock.patch.dict(
+            os.environ,
+            {
+                "BOTANU_API_KEY": "btnu_live_test",
+                "BOTANU_COLLECTOR_ENDPOINT": "http://custom:4318",
+            },
+        ):
+            config = BotanuConfig()
+            assert config.otlp_endpoint == "http://custom:4318"
+            # Header is still set from API key
+            assert config.otlp_headers == {"Authorization": "Bearer btnu_live_test"}
+
+    def test_no_api_key_localhost_default(self):
+        env = {k: v for k, v in os.environ.items()}
+        env.pop("BOTANU_API_KEY", None)
+        env.pop("BOTANU_COLLECTOR_ENDPOINT", None)
+        env.pop("OTEL_EXPORTER_OTLP_ENDPOINT", None)
+        env.pop("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", None)
+        with mock.patch.dict(os.environ, env, clear=True):
+            config = BotanuConfig()
+            assert config.otlp_endpoint == "http://localhost:4318"
+            assert config.otlp_headers is None
+
+
 class TestBotanuConfigAutoInstrument:
     """Tests for auto-instrumentation configuration."""
 

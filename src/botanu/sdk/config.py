@@ -133,18 +133,27 @@ class BotanuConfig:
                 os.getenv("OTEL_DEPLOYMENT_ENVIRONMENT", "production"),
             )
 
+        botanu_api_key = os.getenv("BOTANU_API_KEY")
+
         if self.otlp_endpoint is None:
-            # Check BOTANU_COLLECTOR_ENDPOINT first, then OTEL_* vars
             botanu_endpoint = os.getenv("BOTANU_COLLECTOR_ENDPOINT")
             if botanu_endpoint:
                 self.otlp_endpoint = botanu_endpoint
             else:
-                env_endpoint = os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
+                env_endpoint = (
+                    os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
+                    or os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+                )
                 if env_endpoint:
                     self.otlp_endpoint = env_endpoint
+                elif botanu_api_key:
+                    # API key implies Botanu Cloud — auto-configure endpoint
+                    self.otlp_endpoint = "https://ingest.botanu.ai:4318"
                 else:
-                    base = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4318")
-                    self.otlp_endpoint = base
+                    self.otlp_endpoint = "http://localhost:4318"
+
+        if self.otlp_headers is None and botanu_api_key:
+            self.otlp_headers = {"Authorization": f"Bearer {botanu_api_key}"}
 
         env_propagation_mode = os.getenv("BOTANU_PROPAGATION_MODE")
         if env_propagation_mode and env_propagation_mode in ("lean", "full"):
