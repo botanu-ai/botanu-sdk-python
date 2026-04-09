@@ -34,6 +34,31 @@ _initialized = False
 _current_config: Optional[BotanuConfig] = None
 
 
+def _extract_sampler_ratio(provider) -> float:
+    """Extract the sampling ratio from a TracerProvider's sampler.
+
+    Returns 1.0 (AlwaysOn) if the sampler type is unrecognized.
+    """
+    sampler = getattr(provider, "sampler", None) or getattr(provider, "_sampler", None)
+    if sampler is None:
+        return 1.0
+
+    # Check for ratio-based sampler (e.g., _rate or _ratio attribute)
+    ratio = getattr(sampler, "_rate", None) or getattr(sampler, "_ratio", None)
+    if ratio is not None:
+        return float(ratio)
+
+    # Check for parent-based sampler wrapping a ratio sampler
+    root = getattr(sampler, "_root", None)
+    if root is not None:
+        ratio = getattr(root, "_rate", None) or getattr(root, "_ratio", None)
+        if ratio is not None:
+            return float(ratio)
+
+    # ALWAYS_ON / StaticSampler / unknown — assume 100%
+    return 1.0
+
+
 def enable(
     service_name: Optional[str] = None,
     otlp_endpoint: Optional[str] = None,
@@ -152,25 +177,87 @@ def enable(
 
             resource = Resource.create(resource_attrs)
 
-            provider = TracerProvider(resource=resource, sampler=ALWAYS_ON)
-            trace.set_tracer_provider(provider)
+            from opentelemetry.trace import ProxyTracerProvider
+            from botanu.processors import SampledSpanProcessor
 
             lean_mode = cfg.propagation_mode == "lean"
-            provider.add_span_processor(RunContextEnricher(lean_mode=lean_mode))
 
-            exporter = OTLPSpanExporter(
+            botanu_exporter = OTLPSpanExporter(
                 endpoint=traces_endpoint,
                 headers=cfg.otlp_headers or {},
             )
-            provider.add_span_processor(
-                BatchSpanProcessor(
-                    exporter,
-                    max_export_batch_size=cfg.max_export_batch_size,
-                    max_queue_size=cfg.max_queue_size,
-                    schedule_delay_millis=cfg.schedule_delay_millis,
-                    export_timeout_millis=cfg.export_timeout_millis,
-                )
+            botanu_batch = BatchSpanProcessor(
+                botanu_exporter,
+                max_export_batch_size=cfg.max_export_batch_size,
+                max_queue_size=cfg.max_queue_size,
+                schedule_delay_millis=cfg.schedule_delay_millis,
+                export_timeout_millis=cfg.export_timeout_millis,
             )
+
+            existing = trace.get_tracer_provider()
+
+            if isinstance(existing, TracerProvider):
+                # BROWNFIELD: existing OTel SDK provider — migrate processors,
+                # preserve sampling ratio, add botanu alongside.
+                original_ratio = _extract_sampler_ratio(existing)
+                provider = TracerProvider(
+                    resource=existing.resource,
+                    sampler=ALWAYS_ON,
+                )
+                # Migrate customer's existing processors with their sampling
+                existing_procs = getattr(
+                    getattr(existing, "_active_span_processor", None),
+                    "_span_processors",
+                    (),
+                )
+                for proc in existing_procs:
+                    if original_ratio < 1.0:
+                        provider.add_span_processor(
+                            SampledSpanProcessor(proc, original_ratio)
+                        )
+                    else:
+                        provider.add_span_processor(proc)
+                # Add botanu processors (no sampling — sees 100%)
+                provider.add_span_processor(RunContextEnricher(lean_mode=lean_mode))
+                provider.add_span_processor(botanu_batch)
+                trace.set_tracer_provider(provider)
+
+                if original_ratio < 1.0:
+                    logger.info(
+                        "Botanu SDK: existing TracerProvider detected with "
+                        "%.0f%% sampling. Preserved your sampling ratio for "
+                        "existing exporters. botanu captures 100%%. No impact "
+                        "on your existing observability bill.",
+                        original_ratio * 100,
+                    )
+                else:
+                    logger.info(
+                        "Botanu SDK: existing TracerProvider detected. Added "
+                        "botanu exporter alongside your existing setup."
+                    )
+
+            elif isinstance(existing, ProxyTracerProvider):
+                # GREENFIELD: no real provider — create fresh
+                provider = TracerProvider(resource=resource, sampler=ALWAYS_ON)
+                provider.add_span_processor(RunContextEnricher(lean_mode=lean_mode))
+                provider.add_span_processor(botanu_batch)
+                trace.set_tracer_provider(provider)
+
+            else:
+                # UNKNOWN (e.g., ddtrace) — create parallel provider.
+                # ddtrace's TracerProvider extends OTel API class, NOT SDK class.
+                # It has no add_span_processor(). We create our own provider.
+                # ddtrace continues working unchanged (separate tracing system).
+                logger.warning(
+                    "Botanu SDK: non-standard TracerProvider detected (%s). "
+                    "Creating a separate botanu TracerProvider. Your existing "
+                    "tracing continues unchanged.",
+                    type(existing).__name__,
+                )
+                provider = TracerProvider(resource=resource, sampler=ALWAYS_ON)
+                provider.add_span_processor(RunContextEnricher(lean_mode=lean_mode))
+                provider.add_span_processor(botanu_batch)
+                trace.set_tracer_provider(provider)
 
             set_global_textmap(
                 CompositePropagator(

@@ -53,6 +53,7 @@ def botanu_workflow(
     *,
     event_id: Union[str, Callable[..., str]],
     customer_id: Union[str, Callable[..., str]],
+    step: Optional[str] = None,
     environment: Optional[str] = None,
     tenant_id: Optional[str] = None,
     auto_outcome_on_success: bool = True,
@@ -75,6 +76,10 @@ def botanu_workflow(
             ``(*args, **kwargs)`` as the decorated function and returns a string.
         customer_id: End-customer being served (e.g. org ID). Required.
             Can be a static string or a callable (same signature as *event_id*).
+        step: Step name within a multi-step workflow (e.g. ``"classify"``).
+            Optional — defaults to *name* for single-step workflows.
+            For downstream agents, workflow name and event_id are inherited
+            from W3C Baggage; only *step* needs to be set.
         environment: Deployment environment.
         tenant_id: Tenant identifier for multi-tenant apps.
         auto_outcome_on_success: Emit ``"success"`` if no exception.
@@ -82,17 +87,22 @@ def botanu_workflow(
 
     Examples::
 
-        # Static values (known at decoration time):
+        # Single-step workflow (step defaults to name):
         @botanu_workflow("Support", event_id="ticket-123", customer_id="acme-corp")
         async def handle_ticket(): ...
 
-        # Dynamic values (extracted from function arguments at call time):
+        # Multi-step workflow (explicit step name):
         @botanu_workflow(
             "Support",
+            step="classify",
             event_id=lambda request: request.workflow_id,
             customer_id=lambda request: request.customer_id,
         )
-        async def handle_ticket(request: TicketRequest): ...
+        async def classify_ticket(request: TicketRequest): ...
+
+        # Downstream step (inherits workflow from baggage):
+        @botanu_workflow("Support", step="research", event_id=lambda r: r.event_id, customer_id=lambda r: r.cid)
+        async def research(request): ...
     """
     if isinstance(event_id, str) and not event_id:
         raise ValueError("event_id is required and must be a non-empty string")

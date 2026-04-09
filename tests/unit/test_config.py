@@ -359,7 +359,7 @@ class TestBotanuApiKeyAutoConfig:
             os.environ.pop("OTEL_EXPORTER_OTLP_ENDPOINT", None)
             os.environ.pop("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", None)
             config = BotanuConfig()
-            assert config.otlp_endpoint == "https://ingest.botanu.ai:4318"
+            assert config.otlp_endpoint == "https://ingest.botanu.ai"
 
     def test_api_key_auto_header(self):
         with mock.patch.dict(os.environ, {"BOTANU_API_KEY": "btnu_live_test"}):

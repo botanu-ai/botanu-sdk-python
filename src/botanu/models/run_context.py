@@ -89,6 +89,7 @@ class RunContext:
     event_id: str
     customer_id: str
     environment: str
+    step: Optional[str] = None
     workflow_version: Optional[str] = None
     tenant_id: Optional[str] = None
     parent_run_id: Optional[str] = None

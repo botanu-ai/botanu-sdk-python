@@ -23,6 +23,9 @@ from botanu._version import __version__
 # Run context model
 from botanu.models.run_context import RunContext, RunOutcome, RunStatus
 
+# Processors
+from botanu.processors import RunContextEnricher, SampledSpanProcessor
+
 # Bootstrap
 from botanu.sdk.bootstrap import (
     disable,
@@ -73,4 +76,7 @@ __all__ = [
     "RunContext",
     "RunStatus",
     "RunOutcome",
+    # Processors
+    "RunContextEnricher",
+    "SampledSpanProcessor",
 ]

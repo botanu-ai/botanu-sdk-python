@@ -147,8 +147,8 @@ class BotanuConfig:
                 if env_endpoint:
                     self.otlp_endpoint = env_endpoint
                 elif botanu_api_key:
-                    # API key implies Botanu Cloud — auto-configure endpoint
-                    self.otlp_endpoint = "https://ingest.botanu.ai:4318"
+                    # API key implies Botanu Cloud — gateway routes by key prefix
+                    self.otlp_endpoint = "https://ingest.botanu.ai"
                 else:
                     self.otlp_endpoint = "http://localhost:4318"
 

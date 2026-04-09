@@ -16,9 +16,9 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Run Repolinter
-        uses: todogroup/repolinter-action@v1
+        uses: todogroup/repolinter-action@4d478dcd860571382da7d512d6dc6dd5f554fbb2 # v1
         with:
           config_file: .github/repolinter.json
