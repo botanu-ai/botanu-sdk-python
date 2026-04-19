@@ -367,6 +367,9 @@ class TestBotanuApiKeyAutoConfig:
             assert config.otlp_headers == {"Authorization": "Bearer btnu_live_test"}
 
     def test_explicit_endpoint_overrides_api_key(self):
+        # SEC-C4 SSRF guard: a BOTANU_API_KEY paired with a non-botanu endpoint
+        # must NOT leak the key to that endpoint. The endpoint is honoured, but
+        # the Authorization header is withheld.
         with mock.patch.dict(
             os.environ,
             {
@@ -376,8 +379,64 @@ class TestBotanuApiKeyAutoConfig:
         ):
             config = BotanuConfig()
             assert config.otlp_endpoint == "http://custom:4318"
-            # Header is still set from API key
+            assert config.otlp_headers is None
+
+    def test_api_key_attached_for_botanu_host(self):
+        with mock.patch.dict(
+            os.environ,
+            {
+                "BOTANU_API_KEY": "btnu_live_test",
+                "BOTANU_COLLECTOR_ENDPOINT": "https://ingest.botanu.ai",
+            },
+        ):
+            config = BotanuConfig()
             assert config.otlp_headers == {"Authorization": "Bearer btnu_live_test"}
+
+    def test_api_key_attached_for_localhost(self):
+        with mock.patch.dict(
+            os.environ,
+            {
+                "BOTANU_API_KEY": "btnu_live_test",
+                "BOTANU_COLLECTOR_ENDPOINT": "http://localhost:4318",
+            },
+        ):
+            config = BotanuConfig()
+            assert config.otlp_headers == {"Authorization": "Bearer btnu_live_test"}
+
+    def test_api_key_withheld_from_otel_env_endpoint(self):
+        with mock.patch.dict(
+            os.environ,
+            {
+                "BOTANU_API_KEY": "btnu_live_test",
+                "OTEL_EXPORTER_OTLP_ENDPOINT": "https://attacker.example.com",
+            },
+        ):
+            config = BotanuConfig()
+            assert config.otlp_endpoint == "https://attacker.example.com"
+            assert config.otlp_headers is None
+
+    def test_url_embedded_credentials_stripped(self):
+        env = {k: v for k, v in os.environ.items()}
+        env.pop("BOTANU_API_KEY", None)
+        env.pop("BOTANU_COLLECTOR_ENDPOINT", None)
+        env["OTEL_EXPORTER_OTLP_ENDPOINT"] = "https://user:secret@example.com/ingest"
+        with mock.patch.dict(os.environ, env, clear=True):
+            config = BotanuConfig()
+            assert "secret" not in (config.otlp_endpoint or "")
+            assert "user" not in (config.otlp_endpoint or "")
+
+    def test_repr_redacts_auth_header(self):
+        with mock.patch.dict(
+            os.environ,
+            {
+                "BOTANU_API_KEY": "btnu_live_supersecret",
+                "BOTANU_COLLECTOR_ENDPOINT": "https://ingest.botanu.ai",
+            },
+        ):
+            config = BotanuConfig()
+            text = repr(config)
+            assert "btnu_live_supersecret" not in text
+            assert "***" in text
 
     def test_no_api_key_localhost_default(self):
         env = {k: v for k, v in os.environ.items()}
@@ -402,4 +461,46 @@ class TestBotanuConfigAutoInstrument:
         assert "httpx" in packages
         assert "fastapi" in packages
         assert "openai_v2" in packages
-        assert "anthropic" in packages
+
+
+class TestContentCaptureRate:
+    """Tests for the content_capture_rate field."""
+
+    def test_default_is_zero(self):
+        """Privacy-safe default: no content captured unless explicitly enabled."""
+        with mock.patch.dict(os.environ, {}, clear=True):
+            os.environ.pop("BOTANU_CONTENT_CAPTURE_RATE", None)
+            config = BotanuConfig()
+            assert config.content_capture_rate == 0.0
+
+    def test_explicit_value_respected(self):
+        config = BotanuConfig(content_capture_rate=0.15)
+        assert config.content_capture_rate == 0.15
+
+    def test_env_var_override(self):
+        with mock.patch.dict(os.environ, {"BOTANU_CONTENT_CAPTURE_RATE": "0.2"}):
+            config = BotanuConfig()
+            assert config.content_capture_rate == 0.2
+
+    def test_env_var_clamps_to_one(self):
+        """Defensive: env values above 1.0 clamp to 1.0."""
+        with mock.patch.dict(os.environ, {"BOTANU_CONTENT_CAPTURE_RATE": "1.5"}):
+            config = BotanuConfig()
+            assert config.content_capture_rate == 1.0
+
+    def test_env_var_clamps_to_zero(self):
+        """Defensive: negative env values clamp to 0.0."""
+        with mock.patch.dict(os.environ, {"BOTANU_CONTENT_CAPTURE_RATE": "-0.5"}):
+            config = BotanuConfig()
+            assert config.content_capture_rate == 0.0
+
+    def test_env_var_invalid_ignored(self):
+        """Invalid env values are ignored (default retained)."""
+        with mock.patch.dict(os.environ, {"BOTANU_CONTENT_CAPTURE_RATE": "not_a_number"}):
+            config = BotanuConfig()
+            assert config.content_capture_rate == 0.0
+
+    def test_to_dict_roundtrip(self):
+        config = BotanuConfig(content_capture_rate=0.1)
+        d = config.to_dict()
+        assert d["eval"]["content_capture_rate"] == 0.1

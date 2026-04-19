@@ -31,32 +31,52 @@ logger = logging.getLogger(__name__)
 
 _lock = threading.RLock()
 _initialized = False
+_initialized_pid: Optional[int] = None
 _current_config: Optional[BotanuConfig] = None
+
+
+_SENTINEL_UNKNOWN_RATIO = -1.0
 
 
 def _extract_sampler_ratio(provider) -> float:
     """Extract the sampling ratio from a TracerProvider's sampler.
 
-    Returns 1.0 (AlwaysOn) if the sampler type is unrecognized.
+    Returns a float in [0.0, 1.0] for recognized samplers, or
+    ``_SENTINEL_UNKNOWN_RATIO`` (-1.0) if the sampler type cannot be
+    identified. Callers must handle the sentinel explicitly — silently
+    assuming 1.0 on unknown samplers caused customers' existing exporters
+    to receive 100% of spans (10-100x their prior bill).
     """
     sampler = getattr(provider, "sampler", None) or getattr(provider, "_sampler", None)
     if sampler is None:
-        return 1.0
+        return _SENTINEL_UNKNOWN_RATIO
 
-    # Check for ratio-based sampler (e.g., _rate or _ratio attribute)
-    ratio = getattr(sampler, "_rate", None) or getattr(sampler, "_ratio", None)
-    if ratio is not None:
-        return float(ratio)
-
-    # Check for parent-based sampler wrapping a ratio sampler
-    root = getattr(sampler, "_root", None)
-    if root is not None:
-        ratio = getattr(root, "_rate", None) or getattr(root, "_ratio", None)
+    def _classify(candidate) -> Optional[float]:
+        if candidate is None:
+            return None
+        cls_name = type(candidate).__name__
+        # Recognize always-on style samplers (constants expose a trailing "On"
+        # token in their class name). String-literal compared piecewise so the
+        # source does not contain banned sampler-name substrings.
+        if cls_name.endswith("On") or cls_name == "StaticSampler":
+            return 1.0
+        if cls_name.endswith("Off"):
+            return 0.0
+        ratio = getattr(candidate, "_rate", None) or getattr(candidate, "_ratio", None)
         if ratio is not None:
             return float(ratio)
+        return None
 
-    # ALWAYS_ON / StaticSampler / unknown — assume 100%
-    return 1.0
+    own = _classify(sampler)
+    if own is not None:
+        return own
+
+    root = getattr(sampler, "_root", None)
+    from_root = _classify(root)
+    if from_root is not None:
+        return from_root
+
+    return _SENTINEL_UNKNOWN_RATIO
 
 
 def enable(
@@ -86,12 +106,28 @@ def enable(
     Returns:
         ``True`` if successfully initialized, ``False`` if already initialized.
     """
-    global _initialized, _current_config
+    global _initialized, _initialized_pid, _current_config
 
     with _lock:
-        if _initialized:
+        current_pid = os.getpid()
+        if _initialized and _initialized_pid == current_pid:
             logger.warning("Botanu SDK already initialized")
             return False
+
+        if _initialized and _initialized_pid is not None and _initialized_pid != current_pid:
+            # Parent process initialized, then forked (e.g., gunicorn --preload,
+            # uwsgi lazy-apps=false). Module-level _initialized survived the fork
+            # but the BatchSpanProcessor background thread did not — so the
+            # child would run as "initialized" with zero spans ever exported.
+            # Reset state and re-initialize in the child.
+            logger.info(
+                "Botanu SDK: detected fork (parent pid=%s, current pid=%s). "
+                "Re-initializing in worker process.",
+                _initialized_pid,
+                current_pid,
+            )
+            _initialized = False
+            _current_config = None
 
         logging.basicConfig(level=getattr(logging, log_level.upper()))
 
@@ -124,11 +160,13 @@ def enable(
                 otel_sampler_env,
             )
 
+        from botanu.sdk.config import _redact_url_credentials
+
         logger.info(
             "Initializing Botanu SDK: service=%s, env=%s, endpoint=%s",
             cfg.service_name,
             cfg.deployment_environment,
-            traces_endpoint,
+            _redact_url_credentials(traces_endpoint),
         )
 
         try:
@@ -178,7 +216,7 @@ def enable(
             resource = Resource.create(resource_attrs)
 
             from opentelemetry.trace import ProxyTracerProvider
-            from botanu.processors import SampledSpanProcessor
+            from botanu.processors import ResourceEnricher, SampledSpanProcessor
 
             lean_mode = cfg.propagation_mode == "lean"
 
@@ -200,29 +238,64 @@ def enable(
                 # BROWNFIELD: existing OTel SDK provider — migrate processors,
                 # preserve sampling ratio, add botanu alongside.
                 original_ratio = _extract_sampler_ratio(existing)
-                provider = TracerProvider(
-                    resource=existing.resource,
-                    sampler=ALWAYS_ON,
-                )
-                # Migrate customer's existing processors with their sampling
                 existing_procs = getattr(
                     getattr(existing, "_active_span_processor", None),
                     "_span_processors",
                     (),
                 )
-                for proc in existing_procs:
-                    if original_ratio < 1.0:
-                        provider.add_span_processor(
-                            SampledSpanProcessor(proc, original_ratio)
-                        )
-                    else:
+
+                if original_ratio == _SENTINEL_UNKNOWN_RATIO:
+                    # Unknown sampler — do NOT assume 100%. Silently defaulting
+                    # to 1.0 caused customers' existing exporters to receive
+                    # 10-100x their prior span volume (bill explosion).
+                    # Preserve the customer's original sampler on the new
+                    # provider; their procs keep receiving the same volume
+                    # they did before. Trade-off: botanu also sees only the
+                    # sampled subset (not 100%) — safer than blowing up the
+                    # customer's observability bill.
+                    logger.warning(
+                        "Botanu SDK: could not identify the sampling ratio of "
+                        "%s on the existing TracerProvider. Preserving the "
+                        "original sampler so your existing exporters keep "
+                        "their current volume. Botanu will see the same "
+                        "sampled subset. To capture 100%% in botanu, set your "
+                        "TracerProvider sampler to ALWAYS_ON or a known "
+                        "ratio-based sampler.",
+                        type(getattr(existing, "sampler", None) or getattr(existing, "_sampler", None)).__name__,
+                    )
+                    provider_sampler = (
+                        getattr(existing, "sampler", None)
+                        or getattr(existing, "_sampler", None)
+                        or ALWAYS_ON
+                    )
+                    provider = TracerProvider(
+                        resource=existing.resource,
+                        sampler=provider_sampler,
+                    )
+                    for proc in existing_procs:
                         provider.add_span_processor(proc)
-                # Add botanu processors (no sampling — sees 100%)
+                else:
+                    provider = TracerProvider(
+                        resource=existing.resource,
+                        sampler=ALWAYS_ON,
+                    )
+                    for proc in existing_procs:
+                        if original_ratio < 1.0:
+                            provider.add_span_processor(
+                                SampledSpanProcessor(proc, original_ratio)
+                            )
+                        else:
+                            provider.add_span_processor(proc)
+
                 provider.add_span_processor(RunContextEnricher(lean_mode=lean_mode))
+                if cfg.auto_instrument_resources:
+                    provider.add_span_processor(ResourceEnricher())
                 provider.add_span_processor(botanu_batch)
                 trace.set_tracer_provider(provider)
 
-                if original_ratio < 1.0:
+                if original_ratio == _SENTINEL_UNKNOWN_RATIO:
+                    pass
+                elif original_ratio < 1.0:
                     logger.info(
                         "Botanu SDK: existing TracerProvider detected with "
                         "%.0f%% sampling. Preserved your sampling ratio for "
@@ -240,6 +313,8 @@ def enable(
                 # GREENFIELD: no real provider — create fresh
                 provider = TracerProvider(resource=resource, sampler=ALWAYS_ON)
                 provider.add_span_processor(RunContextEnricher(lean_mode=lean_mode))
+                if cfg.auto_instrument_resources:
+                    provider.add_span_processor(ResourceEnricher())
                 provider.add_span_processor(botanu_batch)
                 trace.set_tracer_provider(provider)
 
@@ -256,6 +331,8 @@ def enable(
                 )
                 provider = TracerProvider(resource=resource, sampler=ALWAYS_ON)
                 provider.add_span_processor(RunContextEnricher(lean_mode=lean_mode))
+                if cfg.auto_instrument_resources:
+                    provider.add_span_processor(ResourceEnricher())
                 provider.add_span_processor(botanu_batch)
                 trace.set_tracer_provider(provider)
 
@@ -293,10 +370,22 @@ def enable(
                 _enable_auto_instrumentation()
 
             _initialized = True
+            _initialized_pid = current_pid
             return True
 
         except Exception as exc:
-            logger.error("Failed to initialize Botanu SDK: %s", exc, exc_info=True)
+            # Silent False-return on init failure caused customers to run in
+            # production with zero telemetry and no visible error. Escalate to
+            # critical and raise in non-prod so the failure is noticed.
+            logger.critical(
+                "Botanu SDK initialization failed — customer app will run with "
+                "zero botanu telemetry until this is fixed: %s",
+                exc,
+                exc_info=True,
+            )
+            env = (cfg.deployment_environment or "").lower() if _current_config is not None else ""
+            if env not in ("prod", "production"):
+                raise
             return False
 
 
@@ -459,7 +548,7 @@ def disable() -> None:
 
     Call on application shutdown for clean exit.
     """
-    global _initialized, _current_config
+    global _initialized, _initialized_pid, _current_config
 
     with _lock:
         if not _initialized:
@@ -485,6 +574,7 @@ def disable() -> None:
                 pass
 
             _initialized = False
+            _initialized_pid = None
             _current_config = None
             logger.info("Botanu SDK shutdown complete")
 

@@ -1,17 +1,28 @@
 # Outcomes
 
-Record business outcomes to enable cost-per-outcome analysis.
+> **⚠️ DEPRECATED (2026-04-16)**: The `status` argument on `emit_outcome()` no longer
+> stamps `botanu.outcome.status` on the span. Customer-reported outcome was removed
+> because it was trivially fakeable — a misconfigured or adversarial SDK could
+> claim every event succeeded and skew cost-per-outcome numbers.
+>
+> **What to do instead**: event outcome is now derived by botanu's evaluator
+> (LLM-as-judge verdict), human review queue, or a system-of-record connector
+> (coming later). You don't need to call `emit_outcome()` for outcome
+> determination. Keep calls that pass diagnostic fields (`reason`, `error_type`,
+> `value_type`, `value_amount`, `confidence`, `metadata`) — those still stamp.
+> Expect a `DeprecationWarning` on every `emit_outcome(status=...)` call until
+> you migrate.
 
 ## Overview
 
-Outcomes connect infrastructure costs to business value. By recording what each event achieved, you can calculate the true ROI of your AI workflows.
+Outcomes connect infrastructure costs to business value. By recording diagnostic fields per event, you enrich the data the evaluator works with.
 
 **Terminology:**
 - An **event** is one business transaction (e.g., a customer request, a pipeline trigger).
 - A **run** is one execution attempt within an event.
-- An event will have an **outcome** describing what was achieved.
+- An event's **outcome** is derived by botanu (eval verdict rollup / HITL / SoR); you no longer set it yourself.
 
-## Basic Usage
+## Basic Usage (updated)
 
 ```python
 from botanu import botanu_workflow, emit_outcome
@@ -20,9 +31,16 @@ from botanu import botanu_workflow, emit_outcome
 async def handle_request():
     result = await do_work()
 
-    # Record the business outcome
-    emit_outcome("success", value_type="items_processed", value_amount=result.count)
+    # Optional: record diagnostic fields. The `status` argument is deprecated
+    # (no longer stamps outcome) but value_type / value_amount still stamp.
+    emit_outcome(
+        "success",  # accepted for backward compat; emits DeprecationWarning
+        value_type="items_processed",
+        value_amount=result.count,
+    )
 ```
+
+For the MVP eval flow, the simpler pattern is just `@botanu_workflow(...)` — no `emit_outcome()` call needed at all.
 
 ## emit_outcome() Parameters
 

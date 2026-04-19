@@ -196,6 +196,21 @@ class TestRunContextSerialization:
         assert attrs["botanu.customer_id"] == "bigretail"
         assert attrs["botanu.tenant_id"] == "tenant-123"
 
+    def test_to_span_attributes_omits_outcome_status(self):
+        """`botanu.outcome.status` is no longer emitted (removed 2026-04-16).
+        Other outcome diagnostic fields still stamp."""
+        ctx = RunContext.create(
+            workflow="Customer Support",
+            event_id="ticket-42",
+            customer_id="bigretail",
+        )
+        ctx.complete(status=RunStatus.SUCCESS, value_type="tickets", value_amount=1.0)
+        attrs = ctx.to_span_attributes()
+
+        assert "botanu.outcome.status" not in attrs
+        assert attrs.get("botanu.outcome.value_type") == "tickets"
+        assert attrs.get("botanu.outcome.value_amount") == 1.0
+
     def test_from_baggage_roundtrip(self):
         original = RunContext.create(
             workflow="test",

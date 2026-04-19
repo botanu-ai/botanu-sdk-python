@@ -15,7 +15,11 @@ from botanu.sdk.context import (
     set_baggage,
 )
 from botanu.sdk.decorators import botanu_outcome, botanu_workflow, run_botanu, workflow
-from botanu.sdk.span_helpers import emit_outcome, set_business_context
+from botanu.sdk.span_helpers import (
+    emit_outcome,
+    set_business_context,
+    set_correlation,
+)
 
 __all__ = [
     "BotanuConfig",
@@ -33,5 +37,6 @@ __all__ = [
     "run_botanu",
     "set_baggage",
     "set_business_context",
+    "set_correlation",
     "workflow",
 ]

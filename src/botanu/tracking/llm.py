@@ -320,6 +320,51 @@ class LLMTracker:
             self.span.set_attribute(BotanuAttributes.ATTEMPT_NUMBER, attempt_number)
         return self
 
+    def set_input_content(self, text: str, max_chars: int = 4096) -> LLMTracker:
+        """Capture the prompt/input text for eval.
+
+        Writes the ``botanu.eval.input_content`` span attribute only if the
+        active :class:`~botanu.sdk.config.BotanuConfig` has a
+        ``content_capture_rate`` > 0.0 that allows this call (simple
+        ``random.random() < rate`` gate). Truncates to ``max_chars``
+        (default 4096) before stamping.
+
+        PII scrubbing is handled downstream by the collector (regex pass)
+        and the evaluator (Presidio NER), not here.
+
+        No-op when ``span`` is unset, ``text`` is empty/None, or the config
+        rate excludes this call.
+        """
+        if not self.span or not text:
+            return self
+        from botanu.sdk.bootstrap import get_config
+        from botanu.sampling.content_sampler import should_capture_content
+
+        cfg = get_config()
+        rate = cfg.content_capture_rate if cfg else 0.0
+        if not should_capture_content(rate):
+            return self
+        self.span.set_attribute("botanu.eval.input_content", text[:max_chars])
+        return self
+
+    def set_output_content(self, text: str, max_chars: int = 4096) -> LLMTracker:
+        """Capture the response/output text for eval.
+
+        See :meth:`set_input_content` for sampling and truncation semantics.
+        Writes the ``botanu.eval.output_content`` span attribute.
+        """
+        if not self.span or not text:
+            return self
+        from botanu.sdk.bootstrap import get_config
+        from botanu.sampling.content_sampler import should_capture_content
+
+        cfg = get_config()
+        rate = cfg.content_capture_rate if cfg else 0.0
+        if not should_capture_content(rate):
+            return self
+        self.span.set_attribute("botanu.eval.output_content", text[:max_chars])
+        return self
+
     def set_request_params(
         self,
         temperature: Optional[float] = None,

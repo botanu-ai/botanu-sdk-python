@@ -271,7 +271,10 @@ class RunContext:
             if self.cancelled_at:
                 attrs["botanu.run.cancelled_at"] = self.cancelled_at
         if self.outcome:
-            attrs["botanu.outcome.status"] = self.outcome.status.value
+            # `botanu.outcome.status` is NOT emitted (removed 2026-04-16):
+            # customer-reported outcome is trivially fakeable. Event outcome
+            # is derived from eval verdict rollup / HITL / SoR instead.
+            # Remaining fields are diagnostic only and stay for debugging.
             if self.outcome.reason_code:
                 attrs["botanu.outcome.reason_code"] = self.outcome.reason_code
             if self.outcome.error_class:

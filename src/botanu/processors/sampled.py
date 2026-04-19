@@ -67,15 +67,15 @@ class SampledSpanProcessor(SpanProcessor):
         span: Span,
         parent_context: Optional[context.Context] = None,
     ) -> None:
-        """Forward on_start to wrapped processor unconditionally.
-
-        on_start runs before we know the final trace_id in some cases,
-        and some processors need it for bookkeeping.
-        """
-        self._wrapped.on_start(span, parent_context)
+        # Gate on_start with the same decision as on_end. Forwarding on_start
+        # unconditionally while gating on_end orphans spans inside wrapped
+        # processors (BatchSpanProcessor, Datadog exporter, etc.) — they hold
+        # start-time bookkeeping for spans whose on_end never fires. Over time
+        # this leaks memory in the customer's process.
+        if self._should_sample(span.context.trace_id):
+            self._wrapped.on_start(span, parent_context)
 
     def on_end(self, span: ReadableSpan) -> None:
-        """Forward on_end only if the trace passes the ratio check."""
         if self._should_sample(span.context.trace_id):
             self._wrapped.on_end(span)
 

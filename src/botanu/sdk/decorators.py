@@ -17,6 +17,7 @@ import contextlib
 import functools
 import hashlib
 import inspect
+import json
 from collections.abc import Mapping
 from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timezone
@@ -46,6 +47,63 @@ def _compute_workflow_version(func: Callable[..., Any]) -> str:
 
 def _get_parent_run_id() -> Optional[str]:
     return get_baggage("botanu.run_id")
+
+
+# ── Content capture (workflow-level) ──────────────────────────────────────
+#
+# Gated by the same `content_capture_rate` config as LLMTracker so a single
+# toggle controls both workflow-level and span-level capture. PII scrubbing
+# is downstream (collector + evaluator) — see botanu/tracking/llm.py:332-333.
+
+_CAPTURE_MAX_CHARS = 4096
+
+
+def _should_capture_content() -> bool:
+    """Single decision per workflow invocation — applied to both input + output
+    so we never land a half-captured pair."""
+    try:
+        from botanu.sdk.bootstrap import get_config
+        from botanu.sampling.content_sampler import should_capture_content
+
+        cfg = get_config()
+        rate = cfg.content_capture_rate if cfg else 0.0
+        return should_capture_content(rate)
+    except Exception:
+        return False
+
+
+def _serialize_for_capture(obj: Any) -> str:
+    """Best-effort stringification. JSON first, repr fallback, truncated."""
+    try:
+        text = json.dumps(obj, default=repr, ensure_ascii=False)
+    except Exception:
+        try:
+            text = repr(obj)
+        except Exception:
+            text = "<unserializable>"
+    return text[:_CAPTURE_MAX_CHARS]
+
+
+def _build_input_payload(
+    func: Callable[..., Any], args: tuple, kwargs: dict
+) -> dict[str, Any]:
+    """Bind call args to parameter names. Falls back to positional if signature
+    binding fails (unusual — reflective calls, C-extension wrappers)."""
+    try:
+        sig = inspect.signature(func)
+        bound = sig.bind_partial(*args, **kwargs)
+        return dict(bound.arguments)
+    except Exception:
+        return {"args": list(args), "kwargs": dict(kwargs)}
+
+
+def _capture_input(span: trace.Span, func: Callable[..., Any], args: tuple, kwargs: dict) -> None:
+    payload = _build_input_payload(func, args, kwargs)
+    span.set_attribute("botanu.eval.input_content", _serialize_for_capture(payload))
+
+
+def _capture_output(span: trace.Span, result: Any) -> None:
+    span.set_attribute("botanu.eval.output_content", _serialize_for_capture(result))
 
 
 def botanu_workflow(
@@ -152,8 +210,15 @@ def botanu_workflow(
                     ctx = otel_baggage.set_baggage(key, value, context=ctx)
                 baggage_token = attach(ctx)
 
+                capture_content = _should_capture_content()
+                if capture_content:
+                    _capture_input(span, func, args, kwargs)
+
                 try:
                     result = await func(*args, **kwargs)
+
+                    if capture_content:
+                        _capture_output(span, result)
 
                     span_attrs = getattr(span, "attributes", None)
                     existing_outcome = (
@@ -216,8 +281,15 @@ def botanu_workflow(
                     ctx = otel_baggage.set_baggage(key, value, context=ctx)
                 baggage_token = attach(ctx)
 
+                capture_content = _should_capture_content()
+                if capture_content:
+                    _capture_input(span, func, args, kwargs)
+
                 try:
                     result = func(*args, **kwargs)
+
+                    if capture_content:
+                        _capture_output(span, result)
 
                     span_attrs = getattr(span, "attributes", None)
                     existing_outcome = (
@@ -275,7 +347,9 @@ def _emit_run_completed(
 
     span.add_event("botanu.run.completed", attributes=event_attrs)
 
-    span.set_attribute("botanu.outcome.status", status.value)
+    # `botanu.outcome.status` no longer emitted (removed 2026-04-16):
+    # customer-reported outcome is trivially fakeable. Event outcome derives
+    # from eval verdict rollup / HITL / SoR. `duration_ms` stays for perf.
     span.set_attribute("botanu.run.duration_ms", duration_ms)
 
 
