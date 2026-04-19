@@ -5,107 +5,90 @@
 
 from __future__ import annotations
 
-from opentelemetry import baggage, context, trace
+import pytest
+from opentelemetry import trace
 
-from botanu.sdk.span_helpers import emit_outcome, set_business_context
+from botanu.sdk.span_helpers import emit_outcome, set_business_context, set_correlation
 
 
 class TestEmitOutcome:
-    """Tests for emit_outcome function."""
+    """emit_outcome is deprecated as an outcome-status signal but retained for
+    diagnostic fields. Status is validated but no longer stamped on the span.
+    """
 
-    def test_emit_success_outcome(self, memory_exporter):
+    def test_emit_outcome_does_not_stamp_status(self, memory_exporter):
+        """The status argument is validated but NOT emitted as
+        `botanu.outcome.status` — removed 2026-04-16."""
         tracer = trace.get_tracer("test")
-        with tracer.start_as_current_span("test-span"):
-            emit_outcome("success")
+        with pytest.warns(DeprecationWarning, match="trivially fakeable"):
+            with tracer.start_as_current_span("test-span"):
+                emit_outcome("success")
 
         spans = memory_exporter.get_finished_spans()
         attrs = dict(spans[0].attributes)
-        assert attrs.get("botanu.outcome.status") == "success"
+        assert "botanu.outcome.status" not in attrs
 
-    def test_emit_failure_outcome(self, memory_exporter):
+    def test_emit_outcome_emits_diagnostic_fields(self, memory_exporter):
+        """Diagnostic fields still stamp (reason, error_type, value_*, confidence)."""
         tracer = trace.get_tracer("test")
-        with tracer.start_as_current_span("test-span"):
-            emit_outcome("failed", reason="timeout")
+        with pytest.warns(DeprecationWarning):
+            with tracer.start_as_current_span("test-span"):
+                emit_outcome(
+                    "failed",
+                    reason="timeout",
+                    error_type="TimeoutError",
+                    value_type="tickets_resolved",
+                    value_amount=5.0,
+                    confidence=0.95,
+                )
 
         spans = memory_exporter.get_finished_spans()
         attrs = dict(spans[0].attributes)
-        assert attrs.get("botanu.outcome.status") == "failed"
         assert attrs.get("botanu.outcome.reason") == "timeout"
-
-    def test_emit_outcome_with_value(self, memory_exporter):
-        tracer = trace.get_tracer("test")
-        with tracer.start_as_current_span("test-span"):
-            emit_outcome(
-                "success",
-                value_type="tickets_resolved",
-                value_amount=5.0,
-            )
-
-        spans = memory_exporter.get_finished_spans()
-        attrs = dict(spans[0].attributes)
-        assert attrs.get("botanu.outcome.status") == "success"
+        assert attrs.get("botanu.outcome.error_type") == "TimeoutError"
         assert attrs.get("botanu.outcome.value_type") == "tickets_resolved"
         assert attrs.get("botanu.outcome.value_amount") == 5.0
-
-    def test_emit_outcome_with_confidence(self, memory_exporter):
-        tracer = trace.get_tracer("test")
-        with tracer.start_as_current_span("test-span"):
-            emit_outcome("success", confidence=0.95)
-
-        spans = memory_exporter.get_finished_spans()
-        attrs = dict(spans[0].attributes)
         assert attrs.get("botanu.outcome.confidence") == 0.95
+        # Still NOT stamping status
+        assert "botanu.outcome.status" not in attrs
 
-    def test_emit_outcome_adds_event(self, memory_exporter):
+    def test_emit_outcome_raises_on_invalid_status(self, memory_exporter):
+        """Status validation retained for backward compatibility."""
         tracer = trace.get_tracer("test")
         with tracer.start_as_current_span("test-span"):
-            emit_outcome("success", value_type="orders", value_amount=1)
+            with pytest.raises(ValueError, match="Invalid outcome status"):
+                emit_outcome("not_a_real_status")
+
+    def test_emit_outcome_event_no_status_attr(self, memory_exporter):
+        """The `botanu.outcome_emitted` span event still fires for diagnostics
+        but does NOT carry `status` in its attributes."""
+        tracer = trace.get_tracer("test")
+        with pytest.warns(DeprecationWarning):
+            with tracer.start_as_current_span("test-span"):
+                emit_outcome("success", value_type="orders", value_amount=1)
 
         spans = memory_exporter.get_finished_spans()
         events = [e for e in spans[0].events if e.name == "botanu.outcome_emitted"]
         assert len(events) == 1
-        assert events[0].attributes["status"] == "success"
+        assert "status" not in dict(events[0].attributes)
 
-    def test_emit_outcome_emits_log_record(self, memory_exporter, log_exporter):
-        """emit_outcome should emit an OTel log record when event_id is in baggage."""
+    def test_emit_outcome_no_log_record(self, memory_exporter, log_exporter):
+        """The OTel log record path has been removed — no collector flush
+        trigger from emit_outcome any more (customer-push outcome deprecated)."""
+        from opentelemetry import baggage, context
+
         tracer = trace.get_tracer("test")
-
-        # Set up baggage with event_id
-        ctx = context.Context()
-        ctx = baggage.set_baggage("botanu.event_id", "ticket-42", context=ctx)
+        ctx = baggage.set_baggage("botanu.event_id", "ticket-42", context=context.Context())
         token = context.attach(ctx)
-
         try:
-            with tracer.start_as_current_span("test-span"):
-                emit_outcome("success")
+            with pytest.warns(DeprecationWarning):
+                with tracer.start_as_current_span("test-span"):
+                    emit_outcome("success")
         finally:
             context.detach(token)
 
-        # Verify log record was emitted
         logs = log_exporter.get_finished_logs()
-        assert len(logs) >= 1
-
-        log = logs[0]
-        assert log.log_record.body == "outcome:success"
-        assert log.log_record.attributes["botanu.event_id"] == "ticket-42"
-        assert log.log_record.attributes["botanu.outcome.status"] == "success"
-
-    def test_emit_outcome_no_log_without_event_id(self, memory_exporter, log_exporter):
-        """emit_outcome should NOT emit a log record when no event_id in baggage."""
-        tracer = trace.get_tracer("test")
-
-        # No baggage set - use clean context
-        ctx = context.Context()
-        token = context.attach(ctx)
-
-        try:
-            with tracer.start_as_current_span("test-span"):
-                emit_outcome("success")
-        finally:
-            context.detach(token)
-
-        # No log records should be emitted
-        logs = log_exporter.get_finished_logs()
+        # Event_id is set but the log emission is gone
         assert len(logs) == 0
 
 
@@ -164,3 +147,75 @@ class TestSetBusinessContext:
         assert attrs.get("botanu.team") == "support"
         assert attrs.get("botanu.cost_center") == "CC-456"
         assert attrs.get("botanu.region") == "eu-central-1"
+
+
+class TestSetCorrelation:
+    """set_correlation stamps botanu.correlation.* for SoR Tier-1 matching."""
+
+    def test_stamps_zendesk_ticket_id(self, memory_exporter):
+        tracer = trace.get_tracer("test")
+        with tracer.start_as_current_span("test-span"):
+            set_correlation(zendesk_ticket_id="T-123")
+
+        attrs = dict(memory_exporter.get_finished_spans()[0].attributes)
+        assert attrs["botanu.correlation.zendesk_ticket_id"] == "T-123"
+
+    def test_stamps_multiple_sor_ids(self, memory_exporter):
+        tracer = trace.get_tracer("test")
+        with tracer.start_as_current_span("test-span"):
+            set_correlation(
+                zendesk_ticket_id="T-1",
+                stripe_charge_id="ch_abc",
+                sfdc_opportunity_id="006000",
+            )
+
+        attrs = dict(memory_exporter.get_finished_spans()[0].attributes)
+        assert attrs["botanu.correlation.zendesk_ticket_id"] == "T-1"
+        assert attrs["botanu.correlation.stripe_charge_id"] == "ch_abc"
+        assert attrs["botanu.correlation.sfdc_opportunity_id"] == "006000"
+
+    def test_drops_none_and_empty(self, memory_exporter):
+        tracer = trace.get_tracer("test")
+        with tracer.start_as_current_span("test-span"):
+            set_correlation(
+                zendesk_ticket_id="T-1",
+                stripe_charge_id=None,
+                hubspot_deal_id="",
+            )
+
+        attrs = dict(memory_exporter.get_finished_spans()[0].attributes)
+        assert "botanu.correlation.zendesk_ticket_id" in attrs
+        assert "botanu.correlation.stripe_charge_id" not in attrs
+        assert "botanu.correlation.hubspot_deal_id" not in attrs
+
+    def test_coerces_non_string_to_string(self, memory_exporter):
+        """A numeric SoR ID (e.g., integer ticket number) should stamp as string."""
+        tracer = trace.get_tracer("test")
+        with tracer.start_as_current_span("test-span"):
+            set_correlation(zendesk_ticket_id=42)
+
+        attrs = dict(memory_exporter.get_finished_spans()[0].attributes)
+        assert attrs["botanu.correlation.zendesk_ticket_id"] == "42"
+
+    def test_unfamiliar_prefix_still_stamps(self, memory_exporter, caplog):
+        """Unknown SoR prefix logs info but still writes the attribute —
+        customers may integrate with SoRs we haven't explicitly named."""
+        import logging
+
+        tracer = trace.get_tracer("test")
+        with caplog.at_level(logging.INFO, logger="botanu.sdk.span_helpers"):
+            with tracer.start_as_current_span("test-span"):
+                set_correlation(acme_ticket_id="A-999")
+
+        attrs = dict(memory_exporter.get_finished_spans()[0].attributes)
+        assert attrs["botanu.correlation.acme_ticket_id"] == "A-999"
+        assert any("unfamiliar SoR prefix" in r.message for r in caplog.records)
+
+    def test_no_args_is_noop(self, memory_exporter):
+        tracer = trace.get_tracer("test")
+        with tracer.start_as_current_span("test-span"):
+            set_correlation()
+
+        attrs = dict(memory_exporter.get_finished_spans()[0].attributes)
+        correlation_attrs = [k for k in attrs if k.startswith("botanu.correlation.")]
+        assert correlation_attrs == []

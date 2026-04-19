@@ -1,294 +1,118 @@
 # Existing OpenTelemetry Setup
 
-Integrate Botanu with your existing OpenTelemetry configuration.
+Integrate botanu with your existing OpenTelemetry configuration — Datadog, Jaeger, Grafana Tempo, Splunk, New Relic, or any OTel-compatible backend.
 
-## Overview
+## Automatic Detection (Recommended)
 
-If you already have OpenTelemetry configured (via Datadog, Splunk, New Relic, or custom setup), Botanu integrates seamlessly. You only need to add the `RunContextEnricher` span processor.
+As of SDK v0.1.0, `enable()` **automatically detects your existing TracerProvider** and adds botanu alongside it. No manual processor setup needed:
 
-## Minimal Integration
+```python
+from botanu import enable
+enable()  # Detects existing OTel, adds botanu alongside
+```
 
-Add just the span processor to your existing provider:
+**What happens under the hood:**
+
+| Your setup | What `enable()` does |
+|-----------|---------------------|
+| OTel SDK with AlwaysOn sampling | Migrates your processors to a new provider, adds botanu exporter alongside |
+| OTel SDK with ratio sampling (e.g., 10%) | Same, but wraps your processors in `SampledSpanProcessor` to preserve your ratio. Your Datadog/Jaeger bill is unchanged. |
+| ddtrace (Datadog Python SDK) | Creates a parallel TracerProvider. ddtrace continues unchanged. |
+| No existing tracing | Creates a fresh provider (standard greenfield path) |
+
+**Zero disruption guarantee:** Your existing dashboards, bills, and sampling are preserved exactly as they were.
+
+## How Sampling Is Preserved
+
+If your existing provider uses ratio-based sampling (e.g., 10%), botanu needs to change the sampler to AlwaysOn (to capture 100% for cost attribution). But your existing exporter should still see only 10%.
+
+botanu solves this with `SampledSpanProcessor`, which wraps your existing processors and applies your original ratio at the export level:
+
+```
+App (AlwaysOn sampler — all spans created)
+  → SampledSpanProcessor(0.1) → Your Datadog exporter → Datadog (sees 10%)
+  → botanu exporter → botanu collector (sees 100%)
+```
+
+This is deterministic — the same trace_id always gets the same sampling decision.
+
+## Manual Integration (Advanced)
+
+If you prefer manual control or want to understand the internals:
 
 ```python
 from opentelemetry import trace
-from botanu.processors.enricher import RunContextEnricher
+from botanu.processors import RunContextEnricher, SampledSpanProcessor
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
-# Your existing TracerProvider
+# Get your existing TracerProvider
 provider = trace.get_tracer_provider()
 
-# Add Botanu's enricher
+# 1. Add RunContextEnricher (propagates run_id, workflow, event_id to all spans)
 provider.add_span_processor(RunContextEnricher())
-```
 
-That's it. All spans will now receive `run_id` from baggage.
-
-## With Existing Instrumentation
-
-Botanu works alongside any existing instrumentation:
-
-```python
-from opentelemetry import trace
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-from opentelemetry.instrumentation.requests import RequestsInstrumentor
-
-from botanu.processors.enricher import RunContextEnricher
-
-# Your existing setup
-provider = TracerProvider()
-provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
-trace.set_tracer_provider(provider)
-
-# Your existing instrumentation
-RequestsInstrumentor().instrument()
-
-# Add Botanu enricher (order doesn't matter)
-provider.add_span_processor(RunContextEnricher())
-```
-
-## With Datadog
-
-```python
-from ddtrace import tracer
-from ddtrace.opentelemetry import TracerProvider
-from opentelemetry import trace
-
-from botanu.processors.enricher import RunContextEnricher
-
-# Datadog's TracerProvider
-provider = TracerProvider()
-trace.set_tracer_provider(provider)
-
-# Add Botanu enricher
-provider.add_span_processor(RunContextEnricher())
-```
-
-## With Splunk
-
-```python
-from splunk_otel.tracing import start_tracing
-from opentelemetry import trace
-
-from botanu.processors.enricher import RunContextEnricher
-
-# Start Splunk tracing
-start_tracing()
-
-# Add Botanu enricher
-provider = trace.get_tracer_provider()
-provider.add_span_processor(RunContextEnricher())
-```
-
-## With New Relic
-
-```python
-from opentelemetry import trace
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-
-from botanu.processors.enricher import RunContextEnricher
-
-# New Relic OTLP endpoint
-provider = TracerProvider()
-provider.add_span_processor(
-    BatchSpanProcessor(
-        OTLPSpanExporter(
-            endpoint="https://otlp.nr-data.net/v1/traces",
-            headers={"api-key": "YOUR_LICENSE_KEY"},
-        )
-    )
+# 2. Add botanu OTLP exporter (sends traces to botanu collector)
+botanu_exporter = OTLPSpanExporter(
+    endpoint="https://ingest.botanu.ai:4318/v1/traces",
+    headers={"Authorization": "Bearer btnu_live_..."},
 )
-trace.set_tracer_provider(provider)
-
-# Add Botanu enricher
-provider.add_span_processor(RunContextEnricher())
+provider.add_span_processor(BatchSpanProcessor(botanu_exporter))
 ```
 
-## With Jaeger
+## With Datadog (ddtrace)
+
+ddtrace uses its own tracing system (not OTel SDK). `enable()` detects this and creates a separate TracerProvider for botanu:
 
 ```python
-from opentelemetry import trace
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.exporter.jaeger.thrift import JaegerExporter
+# ddtrace continues working unchanged
+from ddtrace import tracer  # noqa — ddtrace auto-patches
 
-from botanu.processors.enricher import RunContextEnricher
-
-# Jaeger setup
-provider = TracerProvider()
-provider.add_span_processor(
-    BatchSpanProcessor(
-        JaegerExporter(
-            agent_host_name="localhost",
-            agent_port=6831,
-        )
-    )
-)
-trace.set_tracer_provider(provider)
-
-# Add Botanu enricher
-provider.add_span_processor(RunContextEnricher())
+# botanu creates its own provider alongside ddtrace
+from botanu import enable
+enable()
 ```
 
-## Multiple Exporters
+Both tracing systems run in parallel. No conflicts.
 
-Send to both your APM and a cost-attribution backend:
+**Migration path** (optional, for simplification):
+1. **Phase A** (now): Dual tracing — ddtrace + botanu
+2. **Phase C** (later): Configure ddtrace OTLP export, remove botanu auto-instrumentation
+3. **Phase D** (long-term): Migrate to OTel SDK + Datadog exporter — single tracing layer
 
-```python
-from opentelemetry import trace
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+## Using botanu Decorators
 
-from botanu.processors.enricher import RunContextEnricher
-
-provider = TracerProvider()
-
-# Your APM (e.g., Datadog)
-provider.add_span_processor(
-    BatchSpanProcessor(
-        OTLPSpanExporter(endpoint="https://your-apm.example.com/v1/traces")
-    )
-)
-
-# Botanu collector for cost attribution
-provider.add_span_processor(
-    BatchSpanProcessor(
-        OTLPSpanExporter(endpoint="http://botanu-collector:4318/v1/traces")
-    )
-)
-
-# Botanu enricher (adds run_id to all spans)
-provider.add_span_processor(RunContextEnricher())
-
-trace.set_tracer_provider(provider)
-```
-
-## How RunContextEnricher Works
-
-The enricher reads baggage and writes to span attributes:
-
-```python
-class RunContextEnricher(SpanProcessor):
-    def on_start(self, span, parent_context):
-        # Read run_id from baggage
-        run_id = baggage.get_baggage("botanu.run_id", parent_context)
-        if run_id:
-            span.set_attribute("botanu.run_id", run_id)
-
-        # Read workflow from baggage
-        workflow = baggage.get_baggage("botanu.workflow", parent_context)
-        if workflow:
-            span.set_attribute("botanu.workflow", workflow)
-```
-
-This means:
-- Every span gets `run_id` if it exists in baggage
-- Auto-instrumented spans are enriched automatically
-- No code changes needed in your existing instrumentation
-
-## Using Botanu Decorators
-
-With the enricher in place, use Botanu decorators:
+With either automatic or manual integration, use botanu decorators for cost attribution:
 
 ```python
 from botanu import botanu_workflow, emit_outcome
 
-@botanu_workflow("do_work", event_id=event_id, customer_id=customer_id)
-async def do_work(event_id: str, customer_id: str):
-    # All spans created here (by any instrumentation) get run_id
-    data = do_something()
-    result = await process(data)
-
-    emit_outcome("success")
-```
-
-## Without Botanu Bootstrap
-
-If you don't want to use `enable()`, manually set up propagation:
-
-```python
-from opentelemetry import propagate
-from opentelemetry.propagators.composite import CompositePropagator
-from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
-from opentelemetry.baggage.propagation import W3CBaggagePropagator
-
-# Ensure baggage propagation is enabled
-propagate.set_global_textmap(
-    CompositePropagator([
-        TraceContextTextMapPropagator(),
-        W3CBaggagePropagator(),
-    ])
+@botanu_workflow(
+    name="Customer Support",
+    event_id=lambda req: req.ticket_id,
+    customer_id=lambda req: req.org_id,
 )
+async def handle_ticket(req):
+    result = await process(req)
+    emit_outcome("success", value_type="tickets_resolved", value_amount=1)
+    return result
 ```
 
-## Verifying Integration
-
-Check that run_id appears on spans:
-
-```python
-from opentelemetry import trace, baggage, context
-
-# Set baggage (normally done by @botanu_workflow)
-ctx = baggage.set_baggage("botanu.run_id", "test-123")
-token = context.attach(ctx)
-
-try:
-    tracer = trace.get_tracer("test")
-    with tracer.start_as_current_span("test-span") as span:
-        # Check attribute was set
-        print(span.attributes.get("botanu.run_id"))  # Should print "test-123"
-finally:
-    context.detach(token)
-```
-
-## Processor Order
-
-Span processors are called in order. The enricher should be added after your span exporters:
-
-```python
-# 1. Exporters (send spans to backends)
-provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
-
-# 2. Enrichers (modify spans before export)
-provider.add_span_processor(RunContextEnricher())
-```
-
-However, `RunContextEnricher` uses `on_start()`, so it runs before export regardless.
+All child spans (auto-instrumented OpenAI, database, HTTP calls) inherit the run context automatically via W3C Baggage.
 
 ## Troubleshooting
 
-### run_id Not Appearing
+### run_id not appearing on spans
+1. Verify `enable()` was called (or `RunContextEnricher` was added manually)
+2. Check `@botanu_workflow` is on your entry point functions
+3. Verify W3C Baggage propagator is active: `propagate.get_global_textmap()`
 
-1. Check enricher is added:
-   ```python
-   provider = trace.get_tracer_provider()
-   # Verify RunContextEnricher is in the list
-   ```
+### Existing traces missing after adding botanu
+This should not happen — `enable()` preserves your existing processors. If it does:
+1. Check `enable()` was called ONCE (not multiple times)
+2. Check your existing provider was created BEFORE `enable()` runs
 
-2. Check baggage is set:
-   ```python
-   from opentelemetry import baggage
-   print(baggage.get_baggage("botanu.run_id"))
-   ```
-
-3. Ensure `@botanu_workflow` is used at entry points
-
-### Baggage Not Propagating
-
-Check propagators are configured:
-```python
-from opentelemetry import propagate
-print(propagate.get_global_textmap())
-```
-
-Should include `W3CBaggagePropagator`.
-
-## See Also
-
-- [Auto-Instrumentation](auto-instrumentation.md) - Library instrumentation
-- [Collector Configuration](collector.md) - Collector setup
-- [Architecture](../concepts/architecture.md) - SDK design
+### Sampling concerns
+If you use ratio sampling and see unexpected volume changes in your APM:
+1. Check botanu logs for "Preserved your sampling ratio" message
+2. Verify `SampledSpanProcessor` is wrapping your exporter (not replacing it)

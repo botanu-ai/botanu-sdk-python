@@ -17,6 +17,7 @@ import contextlib
 import functools
 import hashlib
 import inspect
+import json
 from collections.abc import Mapping
 from contextlib import asynccontextmanager, contextmanager
 from datetime import datetime, timezone
@@ -48,11 +49,69 @@ def _get_parent_run_id() -> Optional[str]:
     return get_baggage("botanu.run_id")
 
 
+# ── Content capture (workflow-level) ──────────────────────────────────────
+#
+# Gated by the same `content_capture_rate` config as LLMTracker so a single
+# toggle controls both workflow-level and span-level capture. PII scrubbing
+# is downstream (collector + evaluator) — see botanu/tracking/llm.py:332-333.
+
+_CAPTURE_MAX_CHARS = 4096
+
+
+def _should_capture_content() -> bool:
+    """Single decision per workflow invocation — applied to both input + output
+    so we never land a half-captured pair."""
+    try:
+        from botanu.sdk.bootstrap import get_config
+        from botanu.sampling.content_sampler import should_capture_content
+
+        cfg = get_config()
+        rate = cfg.content_capture_rate if cfg else 0.0
+        return should_capture_content(rate)
+    except Exception:
+        return False
+
+
+def _serialize_for_capture(obj: Any) -> str:
+    """Best-effort stringification. JSON first, repr fallback, truncated."""
+    try:
+        text = json.dumps(obj, default=repr, ensure_ascii=False)
+    except Exception:
+        try:
+            text = repr(obj)
+        except Exception:
+            text = "<unserializable>"
+    return text[:_CAPTURE_MAX_CHARS]
+
+
+def _build_input_payload(
+    func: Callable[..., Any], args: tuple, kwargs: dict
+) -> dict[str, Any]:
+    """Bind call args to parameter names. Falls back to positional if signature
+    binding fails (unusual — reflective calls, C-extension wrappers)."""
+    try:
+        sig = inspect.signature(func)
+        bound = sig.bind_partial(*args, **kwargs)
+        return dict(bound.arguments)
+    except Exception:
+        return {"args": list(args), "kwargs": dict(kwargs)}
+
+
+def _capture_input(span: trace.Span, func: Callable[..., Any], args: tuple, kwargs: dict) -> None:
+    payload = _build_input_payload(func, args, kwargs)
+    span.set_attribute("botanu.eval.input_content", _serialize_for_capture(payload))
+
+
+def _capture_output(span: trace.Span, result: Any) -> None:
+    span.set_attribute("botanu.eval.output_content", _serialize_for_capture(result))
+
+
 def botanu_workflow(
     name: str,
     *,
     event_id: Union[str, Callable[..., str]],
     customer_id: Union[str, Callable[..., str]],
+    step: Optional[str] = None,
     environment: Optional[str] = None,
     tenant_id: Optional[str] = None,
     auto_outcome_on_success: bool = True,
@@ -75,6 +134,10 @@ def botanu_workflow(
             ``(*args, **kwargs)`` as the decorated function and returns a string.
         customer_id: End-customer being served (e.g. org ID). Required.
             Can be a static string or a callable (same signature as *event_id*).
+        step: Step name within a multi-step workflow (e.g. ``"classify"``).
+            Optional — defaults to *name* for single-step workflows.
+            For downstream agents, workflow name and event_id are inherited
+            from W3C Baggage; only *step* needs to be set.
         environment: Deployment environment.
         tenant_id: Tenant identifier for multi-tenant apps.
         auto_outcome_on_success: Emit ``"success"`` if no exception.
@@ -82,17 +145,22 @@ def botanu_workflow(
 
     Examples::
 
-        # Static values (known at decoration time):
+        # Single-step workflow (step defaults to name):
         @botanu_workflow("Support", event_id="ticket-123", customer_id="acme-corp")
         async def handle_ticket(): ...
 
-        # Dynamic values (extracted from function arguments at call time):
+        # Multi-step workflow (explicit step name):
         @botanu_workflow(
             "Support",
+            step="classify",
             event_id=lambda request: request.workflow_id,
             customer_id=lambda request: request.customer_id,
         )
-        async def handle_ticket(request: TicketRequest): ...
+        async def classify_ticket(request: TicketRequest): ...
+
+        # Downstream step (inherits workflow from baggage):
+        @botanu_workflow("Support", step="research", event_id=lambda r: r.event_id, customer_id=lambda r: r.cid)
+        async def research(request): ...
     """
     if isinstance(event_id, str) and not event_id:
         raise ValueError("event_id is required and must be a non-empty string")
@@ -142,8 +210,15 @@ def botanu_workflow(
                     ctx = otel_baggage.set_baggage(key, value, context=ctx)
                 baggage_token = attach(ctx)
 
+                capture_content = _should_capture_content()
+                if capture_content:
+                    _capture_input(span, func, args, kwargs)
+
                 try:
                     result = await func(*args, **kwargs)
+
+                    if capture_content:
+                        _capture_output(span, result)
 
                     span_attrs = getattr(span, "attributes", None)
                     existing_outcome = (
@@ -206,8 +281,15 @@ def botanu_workflow(
                     ctx = otel_baggage.set_baggage(key, value, context=ctx)
                 baggage_token = attach(ctx)
 
+                capture_content = _should_capture_content()
+                if capture_content:
+                    _capture_input(span, func, args, kwargs)
+
                 try:
                     result = func(*args, **kwargs)
+
+                    if capture_content:
+                        _capture_output(span, result)
 
                     span_attrs = getattr(span, "attributes", None)
                     existing_outcome = (
@@ -265,7 +347,9 @@ def _emit_run_completed(
 
     span.add_event("botanu.run.completed", attributes=event_attrs)
 
-    span.set_attribute("botanu.outcome.status", status.value)
+    # `botanu.outcome.status` no longer emitted (removed 2026-04-16):
+    # customer-reported outcome is trivially fakeable. Event outcome derives
+    # from eval verdict rollup / HITL / SoR. `duration_ms` stays for perf.
     span.set_attribute("botanu.run.duration_ms", duration_ms)
 
 

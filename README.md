@@ -8,6 +8,8 @@ This SDK is built on [OpenTelemetry](https://opentelemetry.io/) for event-level 
 
 ## Getting Started
 
+
+
 An **event** is one business transaction — resolving a support ticket, processing
 an order, generating a report. Each event may involve multiple **runs** (LLM calls,
 retries, sub-workflows) across multiple services. By correlating every run to a

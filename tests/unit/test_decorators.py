@@ -160,7 +160,11 @@ class TestBotanuWorkflowDecorator:
         with pytest.raises(TypeError, match="bad type"):
             raises()
 
-    def test_outcome_status_set_on_success(self, memory_exporter):
+    def test_outcome_status_not_emitted_on_success(self, memory_exporter):
+        """`botanu.outcome.status` is no longer emitted (removed 2026-04-16) —
+        customer-reported outcome is trivially fakeable. Event outcome is
+        derived from eval verdict rollup / HITL / SoR instead."""
+
         @botanu_workflow("Test", event_id="evt-1", customer_id="cust-1")
         def my_fn():
             return "ok"
@@ -168,9 +172,11 @@ class TestBotanuWorkflowDecorator:
         my_fn()
         spans = memory_exporter.get_finished_spans()
         attrs = dict(spans[0].attributes)
-        assert attrs["botanu.outcome.status"] == "success"
+        assert "botanu.outcome.status" not in attrs
 
-    def test_outcome_status_set_on_failure(self, memory_exporter):
+    def test_outcome_status_not_emitted_on_failure(self, memory_exporter):
+        """Same removal applies on the failure path."""
+
         @botanu_workflow("Test", event_id="evt-1", customer_id="cust-1")
         def failing():
             raise RuntimeError("boom")
@@ -180,7 +186,7 @@ class TestBotanuWorkflowDecorator:
 
         spans = memory_exporter.get_finished_spans()
         attrs = dict(spans[0].attributes)
-        assert attrs["botanu.outcome.status"] == "failure"
+        assert "botanu.outcome.status" not in attrs
 
     def test_duration_ms_recorded(self, memory_exporter):
         @botanu_workflow("Test", event_id="evt-1", customer_id="cust-1")
@@ -296,6 +302,99 @@ class TestBotanuWorkflowDecorator:
             return "ok"
 
         my_fn()
+
+
+class TestBotanuWorkflowContentCapture:
+    """Tests for @botanu_workflow content capture into botanu.eval.* attrs."""
+
+    def test_no_capture_when_rate_is_zero(self, memory_exporter, monkeypatch):
+        # Default rate=0.0 → nothing captured.
+        @botanu_workflow("Triage", event_id="ticket-1", customer_id="acme")
+        def handle(ticket_id: str, priority: int = 1) -> dict:
+            return {"status": "resolved", "ticket_id": ticket_id}
+
+        handle("ticket-1", priority=3)
+
+        attrs = dict(memory_exporter.get_finished_spans()[0].attributes)
+        assert "botanu.eval.input_content" not in attrs
+        assert "botanu.eval.output_content" not in attrs
+
+    def test_captures_input_and_output_when_enabled(self, memory_exporter, monkeypatch):
+        # Force the capture gate on — bypass the random sampler for determinism.
+        monkeypatch.setattr(
+            "botanu.sdk.decorators._should_capture_content", lambda: True
+        )
+
+        @botanu_workflow("Triage", event_id="ticket-2", customer_id="acme")
+        def handle(ticket_id: str, priority: int = 1) -> dict:
+            return {"status": "resolved", "ticket_id": ticket_id}
+
+        handle("ticket-2", priority=5)
+
+        attrs = dict(memory_exporter.get_finished_spans()[0].attributes)
+        assert "botanu.eval.input_content" in attrs
+        assert "botanu.eval.output_content" in attrs
+
+        # Input payload keys are the function's parameter names, not "args"/"kwargs"
+        assert "ticket_id" in attrs["botanu.eval.input_content"]
+        assert "priority" in attrs["botanu.eval.input_content"]
+        assert "5" in attrs["botanu.eval.input_content"]
+
+        assert "resolved" in attrs["botanu.eval.output_content"]
+        assert "ticket-2" in attrs["botanu.eval.output_content"]
+
+    def test_capture_truncates_large_output(self, memory_exporter, monkeypatch):
+        monkeypatch.setattr(
+            "botanu.sdk.decorators._should_capture_content", lambda: True
+        )
+
+        @botanu_workflow("Bulk", event_id="evt-3", customer_id="acme")
+        def handle() -> str:
+            return "x" * 10_000
+
+        handle()
+
+        attrs = dict(memory_exporter.get_finished_spans()[0].attributes)
+        captured = attrs["botanu.eval.output_content"]
+        assert len(captured) <= 4096 + len('""')  # 4096 content chars + JSON quotes
+
+    def test_capture_survives_unserializable_args(self, memory_exporter, monkeypatch):
+        monkeypatch.setattr(
+            "botanu.sdk.decorators._should_capture_content", lambda: True
+        )
+
+        class Opaque:
+            def __repr__(self) -> str:
+                return "<Opaque instance>"
+
+        @botanu_workflow("Weird", event_id="evt-4", customer_id="acme")
+        def handle(obj) -> str:
+            return "ok"
+
+        handle(Opaque())
+
+        attrs = dict(memory_exporter.get_finished_spans()[0].attributes)
+        # Should not raise; should contain the repr of Opaque
+        assert "botanu.eval.input_content" in attrs
+        assert "Opaque" in attrs["botanu.eval.input_content"]
+
+    def test_input_captured_even_if_function_raises(self, memory_exporter, monkeypatch):
+        """Input is captured BEFORE the call; output is not captured on exception."""
+        monkeypatch.setattr(
+            "botanu.sdk.decorators._should_capture_content", lambda: True
+        )
+
+        @botanu_workflow("Fails", event_id="evt-5", customer_id="acme")
+        def handle(x: int) -> int:
+            raise RuntimeError("boom")
+
+        with pytest.raises(RuntimeError):
+            handle(42)
+
+        attrs = dict(memory_exporter.get_finished_spans()[0].attributes)
+        assert "botanu.eval.input_content" in attrs
+        assert "42" in attrs["botanu.eval.input_content"]
+        assert "botanu.eval.output_content" not in attrs
 
 
 class TestBotanuOutcomeDecorator:

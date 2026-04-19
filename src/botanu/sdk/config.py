@@ -24,8 +24,66 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse, urlunparse
 
 logger = logging.getLogger(__name__)
+
+
+_BOTANU_HOST_SUFFIXES = (".botanu.ai",)
+_BOTANU_DEV_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "0.0.0.0"})
+_SENSITIVE_HEADER_NAMES = frozenset({"authorization", "x-api-key", "botanu-api-key"})
+
+
+def _is_botanu_trusted_endpoint(endpoint: Optional[str]) -> bool:
+    """Return True iff the endpoint host is botanu-owned or a local dev host.
+
+    Used to gate attachment of the botanu API key bearer token to outbound
+    OTLP exports. Attaching the key to an attacker-controlled endpoint (e.g.
+    via `OTEL_EXPORTER_OTLP_ENDPOINT=https://attacker.example.com`) would
+    hand over tenant credentials.
+    """
+    if not endpoint:
+        return False
+    try:
+        parsed = urlparse(endpoint)
+    except (ValueError, AttributeError):
+        return False
+    host = (parsed.hostname or "").lower()
+    if not host:
+        return False
+    if host in _BOTANU_DEV_HOSTS:
+        return True
+    return any(host == suffix.lstrip(".") or host.endswith(suffix) for suffix in _BOTANU_HOST_SUFFIXES)
+
+
+def _redact_url_credentials(url: Optional[str]) -> Optional[str]:
+    """Strip `user:pass@` from a URL so it is safe to log."""
+    if not url:
+        return url
+    try:
+        parsed = urlparse(url)
+    except (ValueError, AttributeError):
+        return url
+    if not (parsed.username or parsed.password):
+        return url
+    host = parsed.hostname or ""
+    if parsed.port:
+        host = f"{host}:{parsed.port}"
+    redacted = parsed._replace(netloc=host)
+    return urlunparse(redacted)
+
+
+def _redact_headers(headers: Optional[Dict[str, str]]) -> Optional[Dict[str, str]]:
+    """Return a copy of headers with sensitive values replaced by `***`."""
+    if not headers:
+        return headers
+    out: Dict[str, str] = {}
+    for key, value in headers.items():
+        if key.lower() in _SENSITIVE_HEADER_NAMES:
+            out[key] = "***"
+        else:
+            out[key] = value
+    return out
 
 
 @dataclass
@@ -67,6 +125,22 @@ class BotanuConfig:
 
     # Propagation mode: "lean" (run_id + workflow only) or "full" (all context)
     propagation_mode: str = "lean"
+
+    # Content capture for eval — 0.0 disables entirely (default, privacy-safe).
+    # Set to 1.0 for sandbox/shadow, 0.10–0.20 for production. Customers must also
+    # call set_input_content() / set_output_content() on their trackers; this rate
+    # gates whether those calls actually write to span attributes. PII scrubbing
+    # happens downstream (collector regex + evaluator Presidio NER), not here.
+    content_capture_rate: float = 0.0
+
+    # Resource-cost inference — default ON. When True, enable() attaches the
+    # ResourceEnricher SpanProcessor which reads OTel semconv attributes
+    # (db.system, http.*.body.size, aws.service, …) and writes the botanu-
+    # namespaced `botanu.cloud_provider` + `botanu.bytes_transferred` that
+    # the cost worker uses to price non-LLM spans. Without this, S3/DynamoDB/
+    # egress all price to $0. Disable only for compliance-sensitive
+    # deployments that must emit zero inferred metadata.
+    auto_instrument_resources: bool = True
 
     # Auto-instrumentation packages to enable
     auto_instrument_packages: List[str] = field(
@@ -133,18 +207,55 @@ class BotanuConfig:
                 os.getenv("OTEL_DEPLOYMENT_ENVIRONMENT", "production"),
             )
 
+        botanu_api_key = os.getenv("BOTANU_API_KEY")
+
         if self.otlp_endpoint is None:
-            # Check BOTANU_COLLECTOR_ENDPOINT first, then OTEL_* vars
             botanu_endpoint = os.getenv("BOTANU_COLLECTOR_ENDPOINT")
             if botanu_endpoint:
                 self.otlp_endpoint = botanu_endpoint
             else:
-                env_endpoint = os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
+                env_endpoint = (
+                    os.getenv("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT")
+                    or os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
+                )
                 if env_endpoint:
                     self.otlp_endpoint = env_endpoint
+                elif botanu_api_key:
+                    # API key implies Botanu Cloud — gateway routes by key prefix
+                    self.otlp_endpoint = "https://ingest.botanu.ai"
                 else:
-                    base = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4318")
-                    self.otlp_endpoint = base
+                    self.otlp_endpoint = "http://localhost:4318"
+
+        if self.otlp_endpoint and (urlparse(self.otlp_endpoint).username or urlparse(self.otlp_endpoint).password):
+            # Embedded credentials in the URL would be logged verbatim elsewhere
+            # and bypass our header redaction. Strip them and require explicit
+            # `otlp_headers=` if the customer actually wanted auth.
+            logger.critical(
+                "Botanu SDK: OTLP endpoint contained embedded credentials. "
+                "Stripping credentials from the URL. Pass secrets via "
+                "otlp_headers= or BOTANU_API_KEY instead."
+            )
+            self.otlp_endpoint = _redact_url_credentials(self.otlp_endpoint)
+
+        if self.otlp_headers is None and botanu_api_key:
+            if _is_botanu_trusted_endpoint(self.otlp_endpoint):
+                self.otlp_headers = {"Authorization": f"Bearer {botanu_api_key}"}
+            else:
+                # SSRF guard: a BOTANU_API_KEY paired with an untrusted endpoint
+                # (typically set via OTEL_EXPORTER_OTLP_ENDPOINT) would send the
+                # tenant's bearer token to that endpoint — full tenant takeover
+                # if the endpoint is attacker-controlled. Refuse to attach the
+                # key; spans still flow to the configured endpoint, but without
+                # botanu credentials.
+                logger.critical(
+                    "Botanu SDK: BOTANU_API_KEY is set but the OTLP endpoint "
+                    "(%s) is not a botanu-owned host. Refusing to send the API "
+                    "key to an untrusted destination. Spans will be exported "
+                    "without botanu authentication. Fix: point OTEL_EXPORTER_"
+                    "OTLP_ENDPOINT at ingest.botanu.ai, or unset BOTANU_API_KEY "
+                    "if you did not intend to authenticate to botanu.",
+                    urlparse(self.otlp_endpoint).hostname or "unknown",
+                )
 
         env_propagation_mode = os.getenv("BOTANU_PROPAGATION_MODE")
         if env_propagation_mode and env_propagation_mode in ("lean", "full"):
@@ -169,6 +280,13 @@ class BotanuConfig:
         if env_export_timeout:
             try:
                 self.export_timeout_millis = int(env_export_timeout)
+            except ValueError:
+                pass
+
+        env_content_rate = os.getenv("BOTANU_CONTENT_CAPTURE_RATE")
+        if env_content_rate is not None:
+            try:
+                self.content_capture_rate = max(0.0, min(1.0, float(env_content_rate)))
             except ValueError:
                 pass
 
@@ -265,6 +383,7 @@ class BotanuConfig:
         export = data.get("export", {})
         propagation = data.get("propagation", {})
         resource = data.get("resource", {})
+        eval_cfg = data.get("eval", {})
         auto_packages = data.get("auto_instrument_packages")
 
         return cls(
@@ -280,12 +399,13 @@ class BotanuConfig:
             schedule_delay_millis=export.get("delay_ms", 5000),
             export_timeout_millis=export.get("export_timeout_ms", 30000),
             propagation_mode=propagation.get("mode", "lean"),
+            content_capture_rate=max(0.0, min(1.0, float(eval_cfg.get("content_capture_rate", 0.0)))),
             auto_instrument_packages=(auto_packages if auto_packages else BotanuConfig().auto_instrument_packages),
             _config_file=config_file,
         )
 
     def to_dict(self) -> Dict[str, Any]:
-        """Export configuration as dictionary."""
+        """Export configuration as dictionary. Sensitive header values are redacted."""
         return {
             "service": {
                 "name": self.service_name,
@@ -297,8 +417,8 @@ class BotanuConfig:
                 "auto_detect": self.auto_detect_resources,
             },
             "otlp": {
-                "endpoint": self.otlp_endpoint,
-                "headers": self.otlp_headers,
+                "endpoint": _redact_url_credentials(self.otlp_endpoint),
+                "headers": _redact_headers(self.otlp_headers),
             },
             "export": {
                 "batch_size": self.max_export_batch_size,
@@ -309,8 +429,26 @@ class BotanuConfig:
             "propagation": {
                 "mode": self.propagation_mode,
             },
+            "eval": {
+                "content_capture_rate": self.content_capture_rate,
+            },
             "auto_instrument_packages": self.auto_instrument_packages,
         }
+
+    def __repr__(self) -> str:
+        # Dataclass default __repr__ would print raw otlp_headers (which contain
+        # the BOTANU_API_KEY bearer token) and endpoint URLs with embedded
+        # credentials. DEBUG logging of config objects would then leak secrets.
+        redacted_headers = _redact_headers(self.otlp_headers)
+        redacted_endpoint = _redact_url_credentials(self.otlp_endpoint)
+        return (
+            f"BotanuConfig(service_name={self.service_name!r}, "
+            f"deployment_environment={self.deployment_environment!r}, "
+            f"otlp_endpoint={redacted_endpoint!r}, "
+            f"otlp_headers={redacted_headers!r}, "
+            f"propagation_mode={self.propagation_mode!r}, "
+            f"content_capture_rate={self.content_capture_rate!r})"
+        )
 
 
 def _interpolate_env_vars(content: str) -> str:

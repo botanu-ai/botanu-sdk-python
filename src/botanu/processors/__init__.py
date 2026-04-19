@@ -8,5 +8,7 @@ All other processing should happen in the OTel Collector.
 """
 
 from botanu.processors.enricher import RunContextEnricher
+from botanu.processors.resource_enricher import ResourceEnricher
+from botanu.processors.sampled import SampledSpanProcessor
 
-__all__ = ["RunContextEnricher"]
+__all__ = ["RunContextEnricher", "ResourceEnricher", "SampledSpanProcessor"]

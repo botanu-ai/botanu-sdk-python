@@ -535,3 +535,102 @@ class TestKwargsPassthrough:
         spans = memory_exporter.get_finished_spans()
         attrs = dict(spans[0].attributes)
         assert attrs["botanu.deployment_id"] == "dep-001"
+
+
+class TestContentCapture:
+    """set_input_content / set_output_content — gated by content_capture_rate."""
+
+    def _with_rate(self, rate: float):
+        """Return a context manager that temporarily sets the active config rate."""
+        from contextlib import contextmanager
+
+        from botanu.sdk import bootstrap
+        from botanu.sdk.config import BotanuConfig
+
+        @contextmanager
+        def _cm():
+            prev = bootstrap._current_config
+            bootstrap._current_config = BotanuConfig(content_capture_rate=rate)
+            try:
+                yield
+            finally:
+                bootstrap._current_config = prev
+
+        return _cm()
+
+    def test_input_content_namespaced_attr_when_rate_one(self, memory_exporter):
+        with self._with_rate(1.0):
+            with track_llm_call(model="gpt-4", vendor="openai") as tracker:
+                tracker.set_input_content("Hello, what is 2+2?")
+
+        attrs = dict(memory_exporter.get_finished_spans()[0].attributes)
+        assert attrs["botanu.eval.input_content"] == "Hello, what is 2+2?"
+
+    def test_output_content_namespaced_attr_when_rate_one(self, memory_exporter):
+        with self._with_rate(1.0):
+            with track_llm_call(model="gpt-4", vendor="openai") as tracker:
+                tracker.set_output_content("2+2 equals 4.")
+
+        attrs = dict(memory_exporter.get_finished_spans()[0].attributes)
+        assert attrs["botanu.eval.output_content"] == "2+2 equals 4."
+
+    def test_rate_zero_does_not_stamp_attr(self, memory_exporter):
+        with self._with_rate(0.0):
+            with track_llm_call(model="gpt-4", vendor="openai") as tracker:
+                tracker.set_input_content("sensitive prompt")
+                tracker.set_output_content("sensitive response")
+
+        attrs = dict(memory_exporter.get_finished_spans()[0].attributes)
+        assert "botanu.eval.input_content" not in attrs
+        assert "botanu.eval.output_content" not in attrs
+
+    def test_default_rate_zero_no_config(self, memory_exporter):
+        """With no active config, default is no-capture (safe default)."""
+        from botanu.sdk import bootstrap
+
+        prev = bootstrap._current_config
+        bootstrap._current_config = None
+        try:
+            with track_llm_call(model="gpt-4", vendor="openai") as tracker:
+                tracker.set_input_content("prompt")
+                tracker.set_output_content("response")
+        finally:
+            bootstrap._current_config = prev
+
+        attrs = dict(memory_exporter.get_finished_spans()[0].attributes)
+        assert "botanu.eval.input_content" not in attrs
+        assert "botanu.eval.output_content" not in attrs
+
+    def test_truncation_to_max_chars(self, memory_exporter):
+        with self._with_rate(1.0):
+            with track_llm_call(model="gpt-4", vendor="openai") as tracker:
+                tracker.set_input_content("x" * 5000, max_chars=4096)
+                tracker.set_output_content("y" * 5000, max_chars=4096)
+
+        attrs = dict(memory_exporter.get_finished_spans()[0].attributes)
+        assert len(attrs["botanu.eval.input_content"]) == 4096
+        assert len(attrs["botanu.eval.output_content"]) == 4096
+
+    def test_custom_max_chars(self, memory_exporter):
+        with self._with_rate(1.0):
+            with track_llm_call(model="gpt-4", vendor="openai") as tracker:
+                tracker.set_input_content("abcdefghij", max_chars=4)
+
+        attrs = dict(memory_exporter.get_finished_spans()[0].attributes)
+        assert attrs["botanu.eval.input_content"] == "abcd"
+
+    def test_empty_string_no_op(self, memory_exporter):
+        with self._with_rate(1.0):
+            with track_llm_call(model="gpt-4", vendor="openai") as tracker:
+                tracker.set_input_content("")
+                tracker.set_output_content("")
+
+        attrs = dict(memory_exporter.get_finished_spans()[0].attributes)
+        assert "botanu.eval.input_content" not in attrs
+        assert "botanu.eval.output_content" not in attrs
+
+    def test_returns_self_for_chaining(self, memory_exporter):
+        with self._with_rate(1.0):
+            with track_llm_call(model="gpt-4", vendor="openai") as tracker:
+                result = tracker.set_input_content("hi").set_output_content("hello")
+                assert result is tracker

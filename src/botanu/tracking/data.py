@@ -184,6 +184,34 @@ class DBTracker:
             self.span.set_attribute("botanu.warehouse.bytes_scanned", bytes_scanned)
         return self
 
+    def set_bytes_transferred(self, *, sent: int = 0, received: int = 0) -> DBTracker:
+        if self.span:
+            self.span.set_attribute("botanu.bytes_transferred", int(sent) + int(received))
+        return self
+
+    def set_retrieval_content(self, text: str, max_chars: int = 4096) -> DBTracker:
+        """Capture retrieved content (for RAG eval).
+
+        Writes the ``botanu.eval.retrieval_content`` span attribute only if
+        the active config's ``content_capture_rate`` > 0.0 allows this call.
+        Truncates to ``max_chars`` (default 4096) before stamping.
+
+        PII scrubbing is handled downstream (collector + evaluator).
+        No-op when ``span`` is unset, ``text`` is empty/None, or the rate
+        excludes this call.
+        """
+        if not self.span or not text:
+            return self
+        from botanu.sdk.bootstrap import get_config
+        from botanu.sampling.content_sampler import should_capture_content
+
+        cfg = get_config()
+        rate = cfg.content_capture_rate if cfg else 0.0
+        if not should_capture_content(rate):
+            return self
+        self.span.set_attribute("botanu.eval.retrieval_content", text[:max_chars])
+        return self
+
     def set_error(self, error: Exception) -> DBTracker:
         if self.span:
             self.span.set_status(Status(StatusCode.ERROR, str(error)))
@@ -210,6 +238,7 @@ def track_db_operation(
     system: str,
     operation: str,
     database: Optional[str] = None,
+    cloud_provider: Optional[str] = None,
     **kwargs: Any,
 ) -> Generator[DBTracker, None, None]:
     """Track a database operation.
@@ -218,6 +247,8 @@ def track_db_operation(
         system: Database system (postgresql, mysql, mongodb, …).
         operation: Type of operation (SELECT, INSERT, …).
         database: Database name (optional).
+        cloud_provider: Explicit cloud tag (``"aws"``/``"gcp"``/``"azure"``).
+            Overrides the inference done by :class:`ResourceEnricher`.
     """
     tracer = trace.get_tracer("botanu.data")
     normalized_system = DB_SYSTEMS.get(system.lower(), system.lower())
@@ -231,6 +262,8 @@ def track_db_operation(
         span.set_attribute("botanu.vendor", normalized_system)
         if database:
             span.set_attribute("db.name", database)
+        if cloud_provider:
+            span.set_attribute("botanu.cloud_provider", cloud_provider.lower())
         for key, value in kwargs.items():
             span.set_attribute(f"botanu.data.{key}", value)
 
@@ -285,6 +318,11 @@ class StorageTracker:
             self.span.set_attribute("botanu.storage.bucket", bucket)
         return self
 
+    def set_bytes_transferred(self, *, sent: int = 0, received: int = 0) -> StorageTracker:
+        if self.span:
+            self.span.set_attribute("botanu.bytes_transferred", int(sent) + int(received))
+        return self
+
     def set_error(self, error: Exception) -> StorageTracker:
         if self.span:
             self.span.set_status(Status(StatusCode.ERROR, str(error)))
@@ -310,6 +348,7 @@ class StorageTracker:
 def track_storage_operation(
     system: str,
     operation: str,
+    cloud_provider: Optional[str] = None,
     **kwargs: Any,
 ) -> Generator[StorageTracker, None, None]:
     """Track a storage operation.
@@ -317,6 +356,7 @@ def track_storage_operation(
     Args:
         system: Storage system (s3, gcs, azure_blob, …).
         operation: Type of operation (GET, PUT, DELETE, …).
+        cloud_provider: Explicit cloud tag. Overrides inference.
     """
     tracer = trace.get_tracer("botanu.storage")
     normalized_system = STORAGE_SYSTEMS.get(system.lower(), system.lower())
@@ -328,6 +368,8 @@ def track_storage_operation(
         span.set_attribute("botanu.storage.system", normalized_system)
         span.set_attribute("botanu.storage.operation", operation.upper())
         span.set_attribute("botanu.vendor", normalized_system)
+        if cloud_provider:
+            span.set_attribute("botanu.cloud_provider", cloud_provider.lower())
         for key, value in kwargs.items():
             span.set_attribute(f"botanu.storage.{key}", value)
 
@@ -380,6 +422,11 @@ class MessagingTracker:
             self.span.record_exception(error)
         return self
 
+    def set_bytes_transferred(self, *, sent: int = 0, received: int = 0) -> MessagingTracker:
+        if self.span:
+            self.span.set_attribute("botanu.bytes_transferred", int(sent) + int(received))
+        return self
+
     def add_metadata(self, **kwargs: Any) -> MessagingTracker:
         if self.span:
             for key, value in kwargs.items():
@@ -399,6 +446,7 @@ def track_messaging_operation(
     system: str,
     operation: str,
     destination: str,
+    cloud_provider: Optional[str] = None,
     **kwargs: Any,
 ) -> Generator[MessagingTracker, None, None]:
     """Track a messaging operation.
@@ -407,6 +455,7 @@ def track_messaging_operation(
         system: Messaging system (sqs, kafka, pubsub, …).
         operation: Type of operation (publish, consume, …).
         destination: Queue/topic name.
+        cloud_provider: Explicit cloud tag. Overrides inference.
     """
     tracer = trace.get_tracer("botanu.messaging")
     normalized_system = MESSAGING_SYSTEMS.get(system.lower(), system.lower())
@@ -420,6 +469,8 @@ def track_messaging_operation(
         span.set_attribute("messaging.operation", operation.lower())
         span.set_attribute("messaging.destination.name", destination)
         span.set_attribute("botanu.vendor", normalized_system)
+        if cloud_provider:
+            span.set_attribute("botanu.cloud_provider", cloud_provider.lower())
         for key, value in kwargs.items():
             span.set_attribute(f"botanu.messaging.{key}", value)
 

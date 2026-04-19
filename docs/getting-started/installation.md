@@ -3,7 +3,6 @@
 ## Requirements
 
 - Python 3.9 or later
-- OpenTelemetry Collector (recommended for production)
 
 ## Install
 
@@ -17,6 +16,16 @@ One install gives you everything:
 - **Auto-instrumentation** for 50+ libraries (HTTP, databases, messaging, GenAI, AWS, gRPC)
 
 Instrumentation packages are lightweight shims that silently no-op when the target library is not installed. Zero bloat.
+
+## Configure
+
+Set your API key as an environment variable. The SDK auto-configures the OTLP endpoint to `ingest.botanu.ai` — no other configuration needed.
+
+```bash
+export BOTANU_API_KEY="btnu_live_..."
+```
+
+That's it. No collector to run, no infrastructure to deploy. Botanu hosts everything.
 
 ## Verify
 
@@ -47,6 +56,7 @@ FROM python:3.12-slim
 WORKDIR /app
 RUN pip install botanu
 COPY . .
+ENV BOTANU_API_KEY="btnu_live_..."
 CMD ["python", "app.py"]
 ```
 
@@ -57,22 +67,6 @@ For running tests and linting:
 ```bash
 pip install "botanu[dev]"
 ```
-
-## Collector Setup
-
-The SDK sends traces to an OpenTelemetry Collector via OTLP HTTP (port 4318). Configure the endpoint via environment variable:
-
-```bash
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
-```
-
-Quick start with Docker:
-
-```bash
-docker run -p 4318:4318 otel/opentelemetry-collector:latest
-```
-
-See [Collector Configuration](../integration/collector.md) for production setup.
 
 ## Next Steps
 

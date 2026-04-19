@@ -668,3 +668,221 @@ class TestProviderCreation:
         source = inspect.getsource(bootstrap.enable)
         assert "TracerProvider(" in source, "enable() must create a new TracerProvider"
         assert "set_tracer_provider" in source, "enable() must call set_tracer_provider"
+
+
+# ---------------------------------------------------------------------------
+# Brownfield detection — existing TracerProvider coexistence
+# ---------------------------------------------------------------------------
+
+
+class TestBrownfieldDetection:
+    """Tests for enable() handling existing TracerProviders without disruption."""
+
+    def _reset_bootstrap(self):
+        """Reset bootstrap state for a clean enable() call."""
+        from botanu.sdk import bootstrap
+        self._orig_init = bootstrap._initialized
+        self._orig_cfg = bootstrap._current_config
+        bootstrap._initialized = False
+        bootstrap._current_config = None
+
+    def _restore_bootstrap(self):
+        from botanu.sdk import bootstrap
+        bootstrap._initialized = self._orig_init
+        bootstrap._current_config = self._orig_cfg
+
+    def test_existing_sdk_provider_always_on(self):
+        """When an AlwaysOn SDKTracerProvider exists, botanu migrates its processors."""
+        from opentelemetry import trace
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+        from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+        from opentelemetry.sdk.trace.sampling import ALWAYS_ON
+        from opentelemetry.sdk.resources import Resource
+
+        self._reset_bootstrap()
+        try:
+            # Set up a pre-existing provider (simulating Jaeger/Tempo setup)
+            existing_exporter = InMemorySpanExporter()
+            existing_provider = TracerProvider(
+                resource=Resource.create({"service.name": "existing-svc"}),
+                sampler=ALWAYS_ON,
+            )
+            existing_provider.add_span_processor(SimpleSpanProcessor(existing_exporter))
+
+            with mock.patch("opentelemetry.trace.get_tracer_provider", return_value=existing_provider):
+                from botanu.sdk import bootstrap
+                result = bootstrap.enable(
+                    service_name="test-svc",
+                    otlp_endpoint="http://localhost:4318",
+                    auto_instrumentation=False,
+                )
+
+            assert result is True
+
+            # The new provider should have been set
+            # Existing exporter should still be accessible (migrated)
+            # We can't easily verify the exact processor chain, but enable() succeeded
+        finally:
+            self._restore_bootstrap()
+
+    def test_existing_sdk_provider_ratio_sampling(self):
+        """When a ratio-sampling provider exists, botanu wraps processors in SampledSpanProcessor."""
+        from opentelemetry import trace
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+        from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+        from opentelemetry.sdk.trace.sampling import TraceIdRatioBased
+        from opentelemetry.sdk.resources import Resource
+
+        self._reset_bootstrap()
+        try:
+            existing_exporter = InMemorySpanExporter()
+            # Use 10% sampling — customer's Datadog setup
+            existing_provider = TracerProvider(
+                resource=Resource.create({"service.name": "datadog-svc"}),
+                sampler=TraceIdRatioBased(0.1),
+            )
+            existing_provider.add_span_processor(SimpleSpanProcessor(existing_exporter))
+
+            with mock.patch("opentelemetry.trace.get_tracer_provider", return_value=existing_provider):
+                from botanu.sdk import bootstrap
+                result = bootstrap.enable(
+                    service_name="test-svc",
+                    otlp_endpoint="http://localhost:4318",
+                    auto_instrumentation=False,
+                )
+
+            assert result is True
+            # Ratio extraction should find 0.1
+            ratio = bootstrap._extract_sampler_ratio(existing_provider)
+            assert ratio == 0.1
+        finally:
+            self._restore_bootstrap()
+
+    def test_greenfield_proxy_provider(self):
+        """When no real provider exists (ProxyTracerProvider), botanu creates fresh."""
+        from opentelemetry.trace import ProxyTracerProvider
+
+        self._reset_bootstrap()
+        try:
+            proxy = ProxyTracerProvider()
+
+            with mock.patch("opentelemetry.trace.get_tracer_provider", return_value=proxy):
+                from botanu.sdk import bootstrap
+                result = bootstrap.enable(
+                    service_name="test-svc",
+                    otlp_endpoint="http://localhost:4318",
+                    auto_instrumentation=False,
+                )
+
+            assert result is True
+        finally:
+            self._restore_bootstrap()
+
+    def test_ddtrace_unknown_provider(self):
+        """When a non-OTel provider (e.g., ddtrace) exists, botanu creates parallel provider."""
+        self._reset_bootstrap()
+        try:
+            # Simulate ddtrace — a provider that is NOT an SDKTracerProvider
+            class FakeTracerProvider:
+                """Mimics ddtrace's TracerProvider (extends API, not SDK)."""
+                pass
+
+            fake = FakeTracerProvider()
+
+            with mock.patch("opentelemetry.trace.get_tracer_provider", return_value=fake):
+                from botanu.sdk import bootstrap
+                result = bootstrap.enable(
+                    service_name="test-svc",
+                    otlp_endpoint="http://localhost:4318",
+                    auto_instrumentation=False,
+                )
+
+            # Should succeed — parallel provider created
+            assert result is True
+        finally:
+            self._restore_bootstrap()
+
+    def test_enable_called_twice_returns_false(self):
+        """Second call to enable() returns False without re-initializing."""
+        from botanu.sdk import bootstrap
+
+        original = bootstrap._initialized
+        bootstrap._initialized = True
+        try:
+            result = bootstrap.enable()
+            assert result is False
+        finally:
+            bootstrap._initialized = original
+
+    def test_sampled_span_processor_deterministic(self):
+        """SampledSpanProcessor produces deterministic results for the same trace_id."""
+        from unittest.mock import MagicMock
+        from botanu.processors.sampled import SampledSpanProcessor
+
+        inner = MagicMock()
+        processor = SampledSpanProcessor(inner, ratio=0.5)
+
+        # Create a mock span with a fixed trace_id
+        span = MagicMock()
+        span.context.trace_id = 0x1234567890ABCDEF1234567890ABCDEF
+
+        # Call on_end multiple times — should always give the same decision
+        results = []
+        for _ in range(10):
+            inner.reset_mock()
+            processor.on_end(span)
+            results.append(inner.on_end.called)
+
+        # All results should be identical (deterministic)
+        assert len(set(results)) == 1, "SampledSpanProcessor must be deterministic"
+
+    def test_sampled_span_processor_ratio_bounds(self):
+        """SampledSpanProcessor respects ratio=0.0 (drop all) and ratio=1.0 (keep all)."""
+        from unittest.mock import MagicMock
+        from botanu.processors.sampled import SampledSpanProcessor
+
+        inner_zero = MagicMock()
+        inner_one = MagicMock()
+
+        proc_zero = SampledSpanProcessor(inner_zero, ratio=0.0)
+        proc_one = SampledSpanProcessor(inner_one, ratio=1.0)
+
+        span = MagicMock()
+        span.context.trace_id = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+
+        proc_zero.on_end(span)
+        assert not inner_zero.on_end.called, "ratio=0.0 should drop all spans"
+
+        proc_one.on_end(span)
+        assert inner_one.on_end.called, "ratio=1.0 should keep all spans"
+
+    def test_extract_sampler_ratio_always_on(self):
+        """_extract_sampler_ratio returns 1.0 for AlwaysOn sampler."""
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.sampling import ALWAYS_ON
+        from botanu.sdk.bootstrap import _extract_sampler_ratio
+
+        provider = TracerProvider(sampler=ALWAYS_ON)
+        assert _extract_sampler_ratio(provider) == 1.0
+
+    def test_extract_sampler_ratio_trace_id_ratio(self):
+        """_extract_sampler_ratio returns correct ratio for TraceIdRatioBased."""
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.sampling import TraceIdRatioBased
+        from botanu.sdk.bootstrap import _extract_sampler_ratio
+
+        provider = TracerProvider(sampler=TraceIdRatioBased(0.25))
+        ratio = _extract_sampler_ratio(provider)
+        assert abs(ratio - 0.25) < 0.01, f"Expected ~0.25, got {ratio}"
+
+    def test_extract_sampler_ratio_parent_based(self):
+        """_extract_sampler_ratio extracts ratio from ParentBased wrapping ratio sampler."""
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.sampling import ParentBased, TraceIdRatioBased
+        from botanu.sdk.bootstrap import _extract_sampler_ratio
+
+        provider = TracerProvider(sampler=ParentBased(TraceIdRatioBased(0.05)))
+        ratio = _extract_sampler_ratio(provider)
+        assert abs(ratio - 0.05) < 0.01, f"Expected ~0.05, got {ratio}"

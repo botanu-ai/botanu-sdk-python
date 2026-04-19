@@ -471,3 +471,84 @@ class TestKwargsPassthrough:
         spans = memory_exporter.get_finished_spans()
         attrs = dict(spans[0].attributes)
         assert attrs["botanu.messaging.partition_key"] == "order-1"
+
+
+class TestRetrievalContentCapture:
+    """DBTracker.set_retrieval_content — gated by content_capture_rate."""
+
+    def _with_rate(self, rate: float):
+        from contextlib import contextmanager
+
+        from botanu.sdk import bootstrap
+        from botanu.sdk.config import BotanuConfig
+
+        @contextmanager
+        def _cm():
+            prev = bootstrap._current_config
+            bootstrap._current_config = BotanuConfig(content_capture_rate=rate)
+            try:
+                yield
+            finally:
+                bootstrap._current_config = prev
+
+        return _cm()
+
+    def test_retrieval_content_namespaced_attr_when_rate_one(self, memory_exporter):
+        with self._with_rate(1.0):
+            with track_db_operation(
+                system="postgresql",
+                operation=DBOperation.SELECT,
+                database="kb",
+            ) as tracker:
+                tracker.set_retrieval_content(
+                    "Document snippet: botanu measures cost per outcome..."
+                )
+
+        attrs = dict(memory_exporter.get_finished_spans()[0].attributes)
+        assert attrs["botanu.eval.retrieval_content"].startswith("Document snippet:")
+
+    def test_rate_zero_does_not_stamp_attr(self, memory_exporter):
+        with self._with_rate(0.0):
+            with track_db_operation(
+                system="postgresql",
+                operation=DBOperation.SELECT,
+                database="kb",
+            ) as tracker:
+                tracker.set_retrieval_content("sensitive retrieved text")
+
+        attrs = dict(memory_exporter.get_finished_spans()[0].attributes)
+        assert "botanu.eval.retrieval_content" not in attrs
+
+    def test_truncation_to_max_chars(self, memory_exporter):
+        with self._with_rate(1.0):
+            with track_db_operation(
+                system="postgresql",
+                operation=DBOperation.SELECT,
+                database="kb",
+            ) as tracker:
+                tracker.set_retrieval_content("z" * 5000, max_chars=4096)
+
+        attrs = dict(memory_exporter.get_finished_spans()[0].attributes)
+        assert len(attrs["botanu.eval.retrieval_content"]) == 4096
+
+    def test_empty_string_no_op(self, memory_exporter):
+        with self._with_rate(1.0):
+            with track_db_operation(
+                system="postgresql",
+                operation=DBOperation.SELECT,
+                database="kb",
+            ) as tracker:
+                tracker.set_retrieval_content("")
+
+        attrs = dict(memory_exporter.get_finished_spans()[0].attributes)
+        assert "botanu.eval.retrieval_content" not in attrs
+
+    def test_returns_self_for_chaining(self, memory_exporter):
+        with self._with_rate(1.0):
+            with track_db_operation(
+                system="postgresql",
+                operation=DBOperation.SELECT,
+                database="kb",
+            ) as tracker:
+                result = tracker.set_retrieval_content("doc").set_table("docs")
+                assert result is tracker
