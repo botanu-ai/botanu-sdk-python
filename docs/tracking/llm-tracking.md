@@ -72,6 +72,35 @@ When the response uses a different model than requested:
 tracker.set_response_model("gpt-4-0613")
 ```
 
+### set_input_content() / set_output_content()
+
+Capture the prompt text and response text for downstream evaluation.
+
+```python
+tracker.set_input_content(prompt_text)
+tracker.set_output_content(response_text)
+```
+
+Both methods are **gated by `BotanuConfig.content_capture_rate`**:
+
+- Default rate is `0.0` — both calls no-op. Nothing is written to the span.
+- Set the rate to `0.10`–`0.20` in production (or `1.0` in a sandbox) to start
+  capturing. The gate is a simple `random.random() < rate` check, so the
+  decision is per-call.
+- Text is truncated at `max_chars` (default 4096) before being stamped.
+
+When capture fires, the SDK writes:
+
+| Attribute | Source |
+| --- | --- |
+| `botanu.eval.input_content` | `set_input_content(text)` |
+| `botanu.eval.output_content` | `set_output_content(text)` |
+
+**PII is not scrubbed in the SDK.** The collector runs a regex redaction pass
+and the evaluator runs Presidio NER before any captured text is stored.
+See [Content Capture](content-capture.md) for the full pipeline and for the
+workflow-level auto-capture path that `@botanu_workflow` provides.
+
 ### set_request_params()
 
 Record request parameters for analysis:

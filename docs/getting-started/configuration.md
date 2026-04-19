@@ -1,36 +1,69 @@
 # Configuration
 
-Botanu SDK can be configured through code, environment variables, or YAML files.
+botanu SDK can be configured with a single environment variable (the common
+case) or through code / YAML for everything else.
 
-## Configuration Precedence
+## Simplest config — just the API key
 
-1. **Code arguments** (explicit values passed to `BotanuConfig`)
-2. **Environment variables** (`BOTANU_*`, `OTEL_*`)
-3. **YAML config file** (`botanu.yaml` or specified path)
-4. **Built-in defaults**
+For the Botanu Cloud SaaS, a single env var is enough:
 
-## Quick Configuration
+```bash
+export BOTANU_API_KEY=<your-api-key>
+python your_app.py
+```
 
-### Code-Based
+When `BOTANU_API_KEY` is set, `enable()` auto-configures the OTLP endpoint
+to `https://ingest.botanu.ai` and attaches the key as a bearer token on the
+exporter. You do not need to set `OTEL_EXPORTER_OTLP_ENDPOINT` too.
+
+## ⚠ The API key is only sent to botanu-trusted endpoints
+
+If you override the OTLP endpoint to something that isn't owned by
+botanu — e.g., you point OTLP at Datadog, Honeycomb, or a self-hosted
+collector — **the SDK will not attach your botanu API key to the
+exporter's Authorization header**. It is silently dropped. This is to
+prevent a misconfigured `OTEL_EXPORTER_OTLP_ENDPOINT` from leaking your
+tenant credentials to a third-party backend.
+
+The trusted endpoint list is hard-coded in
+[`src/botanu/sdk/config.py`](../../src/botanu/sdk/config.py):
+
+- any host ending in `.botanu.ai` (e.g., `ingest.botanu.ai`)
+- `localhost`, `127.0.0.1`, `::1`, `0.0.0.0` (local development)
+
+For any other endpoint the exporter runs without a bearer header. If you
+are shipping OTLP to a non-botanu backend and want auth on that exporter,
+set `OTEL_EXPORTER_OTLP_HEADERS` or pass `otlp_headers=` to `BotanuConfig`
+explicitly — those headers are always honored.
+
+## Configuration precedence
+
+1. **Code arguments** passed to `enable()` or `BotanuConfig(...)`.
+2. **Environment variables** (`BOTANU_*`, `OTEL_*`).
+3. **YAML config file** (`botanu.yaml` or a path you pass).
+4. **Built-in defaults.**
+
+## Code-based
 
 ```python
 from botanu import enable
 
 enable(
     service_name="my-service",
-    otlp_endpoint="http://collector:4318/v1/traces",
+    otlp_endpoint="https://ingest.botanu.ai",
 )
 ```
 
-### Environment Variables
+## Environment variables
 
 ```bash
+export BOTANU_API_KEY=<your-api-key>           # enough on its own for Botanu Cloud
 export OTEL_SERVICE_NAME=my-service
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:4318
 export BOTANU_ENVIRONMENT=production
+export BOTANU_CONTENT_CAPTURE_RATE=0.10        # see Content Capture docs
 ```
 
-### YAML File
+## YAML file
 
 ```yaml
 # botanu.yaml
@@ -40,10 +73,13 @@ service:
   environment: production
 
 otlp:
-  endpoint: http://collector:4318/v1/traces
+  endpoint: https://ingest.botanu.ai
+
+content:
+  capture_rate: 0.10
 
 propagation:
-  mode: lean
+  mode: full
 ```
 
 Load with:
@@ -54,9 +90,7 @@ from botanu.sdk.config import BotanuConfig
 config = BotanuConfig.from_yaml("botanu.yaml")
 ```
 
-## Full Configuration Reference
-
-### BotanuConfig Fields
+## Full `BotanuConfig` fields
 
 ```python
 from dataclasses import dataclass
@@ -74,7 +108,10 @@ class BotanuConfig:
 
     # OTLP exporter
     otlp_endpoint: str = None         # OTEL_EXPORTER_OTLP_ENDPOINT
-    otlp_headers: dict = None         # Custom headers for auth
+    otlp_headers: dict = None         # Custom headers (always honored)
+
+    # API key (auto-configures endpoint + Authorization header on trusted hosts)
+    api_key: str = None               # BOTANU_API_KEY
 
     # Span export
     max_export_batch_size: int = 512
@@ -82,134 +119,88 @@ class BotanuConfig:
     schedule_delay_millis: int = 5000
     export_timeout_millis: int = 30000
 
-    # Propagation mode
-    propagation_mode: str = "lean"    # BOTANU_PROPAGATION_MODE
+    # Content capture for eval (0.0 disables; see Content Capture doc)
+    content_capture_rate: float = 0.0  # BOTANU_CONTENT_CAPTURE_RATE
 
-    # Auto-instrumentation
-    auto_instrument_packages: list = [...]
+    # Propagation mode — "full" is the target. "lean" is deprecated.
+    propagation_mode: str = "lean"    # BOTANU_PROPAGATION_MODE
 ```
 
-## Environment Variables
+## Environment variable reference
 
-### OpenTelemetry Standard Variables
+### OpenTelemetry standard
 
 | Variable | Description | Default |
-|----------|-------------|---------|
+| --- | --- | --- |
 | `OTEL_SERVICE_NAME` | Service name | `unknown_service` |
 | `OTEL_SERVICE_VERSION` | Service version | None |
 | `OTEL_SERVICE_NAMESPACE` | Service namespace | None |
 | `OTEL_DEPLOYMENT_ENVIRONMENT` | Environment name | `production` |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP collector base URL | `http://localhost:4318` |
-| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | OTLP traces endpoint (full URL) | None |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP collector base URL | Auto-set to `https://ingest.botanu.ai` when `BOTANU_API_KEY` is set |
+| `OTEL_EXPORTER_OTLP_HEADERS` | Extra OTLP headers | None |
 
-### Botanu-Specific Variables
+### botanu-specific
 
 | Variable | Description | Default |
-|----------|-------------|---------|
+| --- | --- | --- |
+| `BOTANU_API_KEY` | API key for Botanu Cloud. Auto-configures the endpoint and bearer token on trusted hosts. | None |
 | `BOTANU_ENVIRONMENT` | Fallback for environment | `production` |
-| `BOTANU_PROPAGATION_MODE` | `lean` or `full` | `lean` |
+| `BOTANU_CONTENT_CAPTURE_RATE` | Content-capture sampling rate (0.0–1.0). See [Content Capture](../tracking/content-capture.md). | `0.0` |
+| `BOTANU_PROPAGATION_MODE` | `full` (recommended) or `lean` (deprecated) | `lean` |
 | `BOTANU_AUTO_DETECT_RESOURCES` | Auto-detect cloud resources | `true` |
 | `BOTANU_CONFIG_FILE` | Path to YAML config | None |
+| `BOTANU_COLLECTOR_ENDPOINT` | Override for OTLP endpoint (same behavior as `OTEL_EXPORTER_OTLP_ENDPOINT`) | None |
 
-## YAML Configuration
+## Content capture
 
-### Full Example
+Prompt / response capture for the evaluator is disabled by default.
+Turn it on with `BOTANU_CONTENT_CAPTURE_RATE`:
 
-```yaml
-# botanu.yaml - Full configuration example
-service:
-  name: ${OTEL_SERVICE_NAME:-my-service}
-  version: ${APP_VERSION:-1.0.0}
-  namespace: production
-  environment: ${ENVIRONMENT:-production}
-
-resource:
-  auto_detect: true
-
-otlp:
-  endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://localhost:4318}/v1/traces
-  headers:
-    Authorization: Bearer ${OTLP_AUTH_TOKEN}
-
-export:
-  batch_size: 512
-  queue_size: 2048
-  delay_ms: 5000
-
-propagation:
-  mode: lean
-
-auto_instrument_packages:
-  - requests
-  - httpx
-  - fastapi
-  - sqlalchemy
-  - openai_v2
+```bash
+export BOTANU_CONTENT_CAPTURE_RATE=0.10   # 10% of calls captured
 ```
 
-### Environment Variable Interpolation
+See [Content Capture](../tracking/content-capture.md) for the full
+pipeline, the three capture points, and the PII-scrubbing chain.
 
-The YAML loader supports two interpolation patterns:
+## Propagation modes
 
-```yaml
-# Simple interpolation
-endpoint: ${COLLECTOR_URL}
+botanu's durable direction is **full-mode only** — every cross-service
+call carries the complete run context in W3C Baggage. `lean` mode is still
+present in the SDK for backward compatibility but will be removed; do not
+depend on it.
 
-# With default value
-endpoint: ${COLLECTOR_URL:-http://localhost:4318}
-```
-
-### Loading Configuration
-
-```python
-from botanu.sdk.config import BotanuConfig
-
-# Explicit path
-config = BotanuConfig.from_yaml("config/botanu.yaml")
-
-# Auto-discover (searches botanu.yaml, config/botanu.yaml)
-config = BotanuConfig.from_file_or_env()
-
-# Environment only
-config = BotanuConfig()
-```
-
-## Propagation Modes
-
-### Lean Mode (Default)
-
-Propagates only essential fields to minimize header size:
-
-- `botanu.run_id`
-- `botanu.workflow`
-- `botanu.event_id`
-- `botanu.customer_id`
-
-Best for high-traffic systems where header size matters.
-
-### Full Mode
-
-Propagates all context fields:
-
-- `botanu.run_id`
-- `botanu.workflow`
-- `botanu.event_id`
-- `botanu.customer_id`
-- `botanu.environment`
-- `botanu.tenant_id`
-- `botanu.parent_run_id`
-
-Enable with:
+Set explicitly:
 
 ```bash
 export BOTANU_PROPAGATION_MODE=full
 ```
 
-## Auto-Instrumentation
+See [Context Propagation](../concepts/context-propagation.md) for the
+exact field list.
 
-### Default Packages
+## Zero-code initialization
 
-By default, Botanu enables instrumentation for:
+If you want `enable()` to run without a line of code, import the
+`botanu.register` module at process start. It calls `enable()` under the
+hood:
+
+```bash
+python -c "import botanu.register" -m your_app
+```
+
+Or, for containers, add `botanu.register` to your `PYTHONSTARTUP`:
+
+```bash
+PYTHONSTARTUP=$(python -c "import botanu, os; print(os.path.dirname(botanu.__file__) + '/register.py')")
+```
+
+This is useful when you cannot edit the entry point (e.g., a third-party
+process runner).
+
+## Auto-instrumentation
+
+### Default packages
 
 ```python
 [
@@ -230,9 +221,7 @@ By default, Botanu enables instrumentation for:
 ]
 ```
 
-### Customizing Packages
-
-Override the default list via `BotanuConfig`:
+### Customizing packages
 
 ```python
 from botanu import enable
@@ -242,26 +231,16 @@ config = BotanuConfig(auto_instrument_packages=["requests", "fastapi", "openai_v
 enable(config=config)
 ```
 
-### Disabling Auto-Instrumentation
+### Disabling
 
 ```python
 enable(auto_instrumentation=False)
 ```
 
-## Exporting Configuration
+## See also
 
-```python
-config = BotanuConfig(
-    service_name="my-service",
-    deployment_environment="production",
-)
-
-# Export as dictionary
-print(config.to_dict())
-```
-
-## See Also
-
-- [Architecture](../concepts/architecture.md) - SDK design principles
-- [Collector Configuration](../integration/collector.md) - Collector setup
-- [Existing OTel Setup](../integration/existing-otel.md) - Integration with existing OTel
+- [Quickstart](quickstart.md)
+- [Architecture](../concepts/architecture.md)
+- [Collector](../integration/collector.md)
+- [Existing OTel / Datadog setup](../integration/existing-otel.md)
+- [Content Capture](../tracking/content-capture.md)

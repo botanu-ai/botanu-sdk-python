@@ -27,7 +27,7 @@ The SDK defaults to HTTP (`ingest.botanu.ai:4318`) when `BOTANU_API_KEY` is set.
 No collector configuration is needed on your side. Just set the API key:
 
 ```bash
-export BOTANU_API_KEY="btnu_live_..."
+export BOTANU_API_KEY=<your-api-key>
 ```
 
 ```python
@@ -50,13 +50,25 @@ Or via environment variable:
 export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
 ```
 
+### ⚠ The API key is only sent to botanu-trusted endpoints
+
+If you override the endpoint to a non-botanu host (e.g., a self-hosted
+collector, Datadog, or any third-party OTLP backend), the SDK **does not
+attach your `BOTANU_API_KEY` as an Authorization header**. This prevents a
+misconfigured `OTEL_EXPORTER_OTLP_ENDPOINT` from leaking tenant
+credentials to another vendor. Trusted hosts are `*.botanu.ai` plus local
+dev hosts (`localhost`, `127.0.0.1`, `::1`, `0.0.0.0`); everything else
+runs unauthenticated unless you pass your own `otlp_headers=`. See the
+[Configuration doc](../getting-started/configuration.md#️-the-api-key-is-only-sent-to-botanu-trusted-endpoints)
+for the full list.
+
 ## Data Flow
 
 ```
 Your App (SDK)
     │
     │  OTLP/HTTP (TLS)
-    │  Authorization: Bearer btnu_live_...
+    │  Authorization: Bearer <your-api-key>
     ▼
 ingest.botanu.ai (Botanu-hosted collector)
     │

@@ -19,36 +19,44 @@ When you make an outbound HTTP request, the `botanu.run_id` travels in the `bagg
 
 ## Propagation Modes
 
-### Lean Mode (Default)
+### Full Mode (recommended)
 
-Only propagates essential fields to minimize header size:
+Full mode is the durable direction — every cross-service call carries the
+complete baggage needed to reconstruct run context downstream. The SDK
+propagates exactly these seven keys (defined as `BAGGAGE_KEYS_FULL` in
+[`src/botanu/processors/enricher.py`](../../src/botanu/processors/enricher.py)):
+
 - `botanu.run_id`
 - `botanu.workflow`
 - `botanu.event_id`
 - `botanu.customer_id`
-
-```python
-# Lean mode baggage (~120 bytes)
-baggage: botanu.run_id=019abc12-def3-7890-abcd-1234567890ab,botanu.workflow=process,botanu.event_id=evt-001,botanu.customer_id=cust-456
-```
-
-### Full Mode
-
-Propagates all context fields. In addition to the lean fields, full mode adds:
 - `botanu.environment`
 - `botanu.tenant_id`
 - `botanu.parent_run_id`
-- `botanu.root_run_id`
-- `botanu.attempt`
-- `botanu.retry_of_run_id`
-- `botanu.deadline`
-- `botanu.cancelled`
+
+Enable it explicitly:
+
+```bash
+export BOTANU_PROPAGATION_MODE=full
+```
 
 ```python
-# Enable full mode
-import os
-os.environ["BOTANU_PROPAGATION_MODE"] = "full"
+# Full mode baggage (~250 bytes, values-dependent)
+baggage: botanu.run_id=019abc12-...,botanu.workflow=process,botanu.event_id=evt-001,botanu.customer_id=cust-456,botanu.environment=production,botanu.tenant_id=tnt-abc,botanu.parent_run_id=019abc11-...
 ```
+
+Fields that live on `RunContext` but **not** in baggage — `root_run_id`,
+`attempt`, `retry_of_run_id`, `deadline`, `cancelled` — are reconstructed
+from local state, not carried on the wire. If you need them downstream,
+propagate them yourself via your message envelope (see "Message Queue
+Propagation" below).
+
+### Lean Mode (deprecated — will be removed)
+
+Lean mode propagates only the first four keys from the full list. It was
+the default in early 0.x releases and is still accepted for backward
+compatibility, but it is **deprecated** — full mode will become the only
+mode in a future release. Do not build new services assuming lean mode.
 
 ## In-Process Propagation
 
@@ -181,12 +189,13 @@ The same `run_id` flows through all services, enabling:
 
 ## Baggage Size Limits
 
-W3C Baggage has practical size limits. The SDK uses lean mode by default to stay well under these limits:
+W3C Baggage has practical size limits (most intermediaries allow 8 KB, but
+individual hops may clip earlier). Typical sizes for botanu baggage:
 
-| Mode | Typical Size | Recommendation |
-|------|--------------|----------------|
-| Lean | ~120 bytes | Use for most cases |
-| Full | ~350 bytes | Use when you need all context downstream |
+| Mode | Typical size | Notes |
+| --- | --- | --- |
+| Full (recommended) | ~250 bytes | 7 keys, well under any limit |
+| Lean (deprecated) | ~120 bytes | 4 keys, historical only |
 
 ## Propagation and Auto-Instrumentation
 

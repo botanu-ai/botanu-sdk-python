@@ -32,14 +32,15 @@ event cost?" and "What was the outcome?"
 
 - [LLM Tracking](tracking/llm-tracking.md) — Track AI model calls and token usage
 - [Data Tracking](tracking/data-tracking.md) — Track database, storage, and messaging operations
-- [Outcomes](tracking/outcomes.md) — Record business outcomes for ROI calculation
+- [Content Capture](tracking/content-capture.md) — Capture prompts and responses for eval (opt-in)
+- [Outcomes](tracking/outcomes.md) — Record diagnostic context; how event outcome is actually resolved
 
 ### Integration
 
 - [Auto-Instrumentation](integration/auto-instrumentation.md) — Supported libraries and frameworks
 - [Kubernetes Deployment](integration/kubernetes.md) — Zero-code instrumentation at scale
-- [Existing OTel Setup](integration/existing-otel.md) — Integrate with existing OpenTelemetry deployments
-- [Collector Configuration](integration/collector.md) — Configure the OpenTelemetry Collector
+- [Using botanu with existing OTel / Datadog](integration/existing-otel.md) — Brownfield detection, sampling preservation, ddtrace coexistence
+- [Collector](integration/collector.md) — Botanu Cloud collector endpoints and auth
 
 ### Patterns
 
@@ -55,16 +56,19 @@ event cost?" and "What was the outcome?"
 ## Quick Example
 
 ```python
-from botanu import enable, botanu_workflow, emit_outcome
+from botanu import enable, botanu_workflow
 
-enable()
+enable()   # reads BOTANU_API_KEY from env; auto-configures endpoint
 
 @botanu_workflow("my-workflow", event_id="evt-001", customer_id="cust-42")
 async def do_work():
-    result = await do_something()
-    emit_outcome("success")
-    return result
+    return await do_something()
 ```
+
+Outcome is resolved server-side from eval verdict / HITL / SoR — you do
+not need to call `emit_outcome` to record success. See
+[Outcomes](tracking/outcomes.md) for diagnostic annotations that are
+still useful.
 
 ## License
 

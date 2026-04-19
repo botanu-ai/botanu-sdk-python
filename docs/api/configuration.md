@@ -17,13 +17,15 @@ from botanu.sdk.config import BotanuConfig
 | `service_namespace` | `str` | From env | Service namespace |
 | `deployment_environment` | `str` | From env / `"production"` | Deployment environment |
 | `auto_detect_resources` | `bool` | `True` | Auto-detect cloud resources |
-| `otlp_endpoint` | `str` | From env / `"http://localhost:4318"` | OTLP endpoint |
-| `otlp_headers` | `dict` | `None` | Custom headers for OTLP exporter |
+| `api_key` | `str` | From env (`BOTANU_API_KEY`) | Auto-configures the endpoint to `https://ingest.botanu.ai` and attaches a bearer token on botanu-trusted hosts only |
+| `otlp_endpoint` | `str` | From env / auto-configured from `api_key` / `"http://localhost:4318"` | OTLP endpoint |
+| `otlp_headers` | `dict` | `None` | Custom headers for OTLP exporter — always honored |
+| `content_capture_rate` | `float` | `0.0` | Prompt/response capture rate (0.0–1.0). See the [Content Capture doc](../tracking/content-capture.md). |
 | `max_export_batch_size` | `int` | `512` | Max spans per batch |
 | `max_queue_size` | `int` | `65536` | Max spans in queue (~64 MB at ~1 KB/span) |
 | `schedule_delay_millis` | `int` | `5000` | Delay between batch exports |
 | `export_timeout_millis` | `int` | `30000` | Timeout for export operations |
-| `propagation_mode` | `str` | `"lean"` | `"lean"` or `"full"` |
+| `propagation_mode` | `str` | `"lean"` | `"full"` (recommended) or `"lean"` (deprecated — will be removed) |
 | `auto_instrument_packages` | `list` | See below | Packages to auto-instrument |
 
 ### Constructor

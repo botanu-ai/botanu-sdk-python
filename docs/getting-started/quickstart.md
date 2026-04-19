@@ -5,7 +5,7 @@ Get event-level cost attribution working in 5 minutes.
 ## Prerequisites
 
 - Python 3.9+
-- OpenTelemetry Collector running (see [Collector Configuration](../integration/collector.md))
+- A botanu API key (sign up at [botanu.ai](https://botanu.ai))
 
 ## Step 1: Install
 
@@ -13,20 +13,28 @@ Get event-level cost attribution working in 5 minutes.
 pip install botanu
 ```
 
-## Step 2: Set Environment Variables
+## Step 2: Set one environment variable
+
+```bash
+export BOTANU_API_KEY=<your-api-key>
+```
+
+That's it for the Botanu Cloud SaaS. The SDK auto-configures the OTLP
+endpoint to `https://ingest.botanu.ai` and attaches your API key as a
+bearer token.
+
+### Alternative — self-hosted or local collector
+
+If you run your own OTel collector, point at it explicitly:
 
 ```bash
 export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
 export OTEL_SERVICE_NAME=my-service
 ```
 
-Or in Docker / Kubernetes:
-
-```yaml
-environment:
-  - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4318
-  - OTEL_SERVICE_NAME=my-service
-```
+See [Collector](../integration/collector.md). Note: the SDK does not
+attach your `BOTANU_API_KEY` to non-botanu endpoints — set
+`OTEL_EXPORTER_OTLP_HEADERS` if your self-hosted collector needs auth.
 
 ## Step 3: Enable SDK
 
@@ -37,6 +45,11 @@ enable()
 ```
 
 Call `enable()` once at application startup. It reads configuration from environment variables — no hardcoded values needed.
+
+> **Already using Datadog or another OTel APM?** `enable()` auto-detects
+> your existing TracerProvider and adds botanu alongside without
+> disturbing your sampling ratio or APM bill. See [Using botanu with an
+> existing OTel / APM setup](../integration/existing-otel.md).
 
 ## Step 4: Define Entry Point
 
@@ -57,7 +70,7 @@ All LLM calls, database queries, and HTTP requests inside the function are autom
 **Entry service** (`entry/app.py`):
 
 ```python
-from botanu import enable, botanu_workflow, emit_outcome
+from botanu import enable, botanu_workflow
 
 enable()
 
@@ -68,10 +81,11 @@ enable()
 )
 async def handle_request(req):
     data = await fetch_data(req)
-    result = await process(data)
-    emit_outcome("success")
-    return result
+    return await process(data)
 ```
+
+No `emit_outcome("success")` call is needed — event outcome is resolved
+server-side from eval verdict / HITL / SoR. See [Outcomes](../tracking/outcomes.md).
 
 **Downstream service** (`intermediate/app.py`):
 
@@ -97,6 +111,9 @@ All spans across all services share the same `run_id`, enabling cost-per-event a
 
 ## Next Steps
 
-- [Configuration](configuration.md) - Environment variables and YAML config
-- [Kubernetes Deployment](../integration/kubernetes.md) - Zero-code instrumentation at scale
-- [Context Propagation](../concepts/context-propagation.md) - How run_id flows across services
+- [Configuration](configuration.md) — environment variables and YAML config
+- [Using botanu with existing OTel / Datadog](../integration/existing-otel.md) — brownfield detection + sampling preservation
+- [Content Capture](../tracking/content-capture.md) — enabling prompt/response capture for eval
+- [Outcomes](../tracking/outcomes.md) — how event outcome is resolved
+- [Kubernetes Deployment](../integration/kubernetes.md) — zero-code instrumentation at scale
+- [Context Propagation](../concepts/context-propagation.md) — how run_id flows across services

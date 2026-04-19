@@ -12,6 +12,7 @@ from botanu import botanu_workflow
     *,
     event_id: Union[str, Callable[..., str]],
     customer_id: Union[str, Callable[..., str]],
+    step: Optional[str] = None,
     environment: Optional[str] = None,
     tenant_id: Optional[str] = None,
     auto_outcome_on_success: bool = True,
@@ -26,6 +27,7 @@ from botanu import botanu_workflow
 | `name` | `str` | Required | Workflow name (low cardinality, e.g. `"Customer Support"`) |
 | `event_id` | `str \| Callable` | Required | Business transaction identifier (e.g. ticket ID). Can be a static string or a callable that receives the same `(*args, **kwargs)` as the decorated function. |
 | `customer_id` | `str \| Callable` | Required | End-customer being served (e.g. org ID). Same static/callable rules as `event_id`. |
+| `step` | `str` | `None` | Step name within a multi-step workflow (e.g. `"classify"`, `"research"`). ⚠ Accepted and stored on `RunContext` but **not yet emitted as a span attribute** — the collector servicegraph work that consumes it has not landed. Forward-compatible. |
 | `environment` | `str` | From env | Deployment environment |
 | `tenant_id` | `str` | `None` | Tenant identifier for multi-tenant systems |
 | `auto_outcome_on_success` | `bool` | `True` | Emit `"success"` outcome if no exception |

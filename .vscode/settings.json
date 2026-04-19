@@ -1,0 +1,35 @@
+{
+  "// PURPOSE": "Makes Cursor / VS Code show ruff + mypy warnings inline while you edit. Install the 'Ruff' and 'Python' extensions from the Cursor extension panel for full effect.",
+
+  "python.analysis.typeCheckingMode": "basic",
+  "python.analysis.autoImportCompletions": true,
+  "python.analysis.diagnosticMode": "workspace",
+
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.fixAll.ruff": "explicit",
+      "source.organizeImports.ruff": "explicit"
+    }
+  },
+
+  "ruff.enable": true,
+  "ruff.importStrategy": "fromEnvironment",
+  "ruff.lint.run": "onType",
+  "ruff.nativeServer": "on",
+
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/.mypy_cache": true,
+    "**/.ruff_cache": true,
+    "**/.pytest_cache": true
+  },
+
+  "files.associations": {
+    "*.toml": "toml"
+  },
+  "cursorpyright.analysis.autoImportCompletions": true,
+  "cursorpyright.analysis.diagnosticMode": "workspace",
+  "cursorpyright.analysis.typeCheckingMode": "basic"
+}

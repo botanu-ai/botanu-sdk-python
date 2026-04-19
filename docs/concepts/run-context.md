@@ -197,15 +197,21 @@ emit_outcome(
 ### To Baggage (for HTTP propagation)
 
 ```python
-# Lean mode (default): essential fields
-baggage = ctx.to_baggage_dict()
-# {"botanu.run_id": "...", "botanu.workflow": "...", "botanu.event_id": "...", "botanu.customer_id": "..."}
-
-# Full mode: all fields
+# Full mode (recommended): all seven baggage keys
 baggage = ctx.to_baggage_dict(lean_mode=False)
-# Adds: botanu.environment, botanu.tenant_id, botanu.parent_run_id, botanu.root_run_id,
-#        botanu.attempt, botanu.retry_of_run_id, botanu.deadline, botanu.cancelled
+# {"botanu.run_id": "...", "botanu.workflow": "...", "botanu.event_id": "...",
+#  "botanu.customer_id": "...", "botanu.environment": "...",
+#  "botanu.tenant_id": "...", "botanu.parent_run_id": "..."}
+
+# Lean mode (deprecated — will be removed): first four keys only
+baggage = ctx.to_baggage_dict(lean_mode=True)
+# {"botanu.run_id": "...", "botanu.workflow": "...",
+#  "botanu.event_id": "...", "botanu.customer_id": "..."}
 ```
+
+Fields that live on `RunContext` but are **not** in baggage —
+`root_run_id`, `attempt`, `retry_of_run_id`, `deadline`, `cancelled` —
+are reconstructed from local state.
 
 ### To Span Attributes
 

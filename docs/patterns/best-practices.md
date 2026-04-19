@@ -46,24 +46,37 @@ Workflow names appear in dashboards and queries. Choose names carefully:
 
 ## Outcome Recording
 
-### Always Record Outcomes
+### Outcome is derived, not reported
 
-Every run should have an explicit outcome:
+Event outcome is computed server-side from eval verdict rollup / HITL / SoR
+connector — not from `emit_outcome(status=...)`. The `status` argument is
+now a diagnostic helper only (it raises a `DeprecationWarning` on every
+call). You do **not** need to call `emit_outcome` to record success or
+failure; `@botanu_workflow` already creates the run and the platform will
+resolve its outcome.
+
+`emit_outcome` is still useful when you want to annotate the run with
+*diagnostic* context the dashboard can show alongside outcome:
 
 ```python
 @botanu_workflow("process_data", event_id=data_id, customer_id=customer_id)
 async def process_data(data_id: str, customer_id: str):
     try:
         result = await process(data_id)
+        # Stamp value_type / value_amount for cost-per-value math.
         emit_outcome("success", value_type="records_processed", value_amount=result.count)
         return result
-    except ValidationError:
-        emit_outcome("failed", reason="validation_error")
+    except ValidationError as exc:
+        # Stamp the reason/error_type so the dashboard can group failures.
+        emit_outcome("failed", reason="validation_error", error_type=type(exc).__name__)
         raise
     except TimeoutError:
-        emit_outcome("failed", reason="timeout")
+        emit_outcome("failed", reason="timeout", error_type="TimeoutError")
         raise
 ```
+
+See [Outcomes](../tracking/outcomes.md) for the full list of diagnostic
+fields that still stamp.
 
 ### Quantify Value When Possible
 

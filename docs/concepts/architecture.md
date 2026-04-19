@@ -43,9 +43,14 @@ class BotanuConfig:
     service_name: str
     deployment_environment: str
     otlp_endpoint: str
-    propagation_mode: str  # "lean" or "full"
+    api_key: str               # BOTANU_API_KEY; auto-configures endpoint + bearer
+    content_capture_rate: float # 0.0 default; see Content Capture
+    propagation_mode: str      # "full" (recommended); "lean" is deprecated
     auto_instrument_packages: List[str]
 ```
+
+Content capture for eval (prompts/responses) is opt-in and disabled by
+default. See [Content Capture](../tracking/content-capture.md).
 
 ### RunContext
 
