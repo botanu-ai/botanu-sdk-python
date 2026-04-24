@@ -173,114 +173,27 @@ Syntax:
 
 ---
 
-## enable()
+## `disable()`
 
-Bootstrap function to initialise the SDK.
-
-```python
-from botanu import enable
-
-enable(
-    service_name: Optional[str] = None,
-    otlp_endpoint: Optional[str] = None,
-    environment: Optional[str] = None,
-    auto_instrumentation: bool = True,
-    propagators: Optional[List[str]] = None,
-    log_level: str = "INFO",
-    config: Optional[BotanuConfig] = None,
-    config_file: Optional[str] = None,
-) -> bool
-```
-
-### Parameters
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `service_name` | `str` | From env | Service name |
-| `otlp_endpoint` | `str` | From env | OTLP endpoint URL |
-| `environment` | `str` | From env | Deployment environment |
-| `auto_instrumentation` | `bool` | `True` | Enable auto-instrumentation |
-| `propagators` | `list[str]` | `["tracecontext", "baggage"]` | Propagator list |
-| `log_level` | `str` | `"INFO"` | Logging level |
-| `config` | `BotanuConfig` | `None` | Pre-built configuration (overrides individual params) |
-| `config_file` | `str` | `None` | Path to YAML config file |
-
-### Returns
-
-`True` if successfully initialised, `False` if already initialised.
-
-### Behaviour
-
-1. Creates/merges `BotanuConfig`
-2. Configures `TracerProvider` with `RunContextEnricher`
-3. Sets up OTLP exporter
-4. Enables auto-instrumentation (if requested)
-5. Configures W3C Baggage propagation
-
-### Examples
-
-#### Minimal
+Flush pending spans and shut down the SDK cleanly. Typically called at application shutdown.
 
 ```python
-from botanu import enable
+import botanu
 
-enable(service_name="my-service")
-```
-
-#### With Config Object
-
-```python
-from botanu import enable
-from botanu.sdk.config import BotanuConfig
-
-config = BotanuConfig.from_yaml("config/botanu.yaml")
-enable(config=config)
-```
-
-#### From environment only
-
-```python
-from botanu import enable
-
-# Reads OTEL_SERVICE_NAME, OTEL_EXPORTER_OTLP_ENDPOINT, etc.
-enable()
+botanu.disable()
 ```
 
 ---
 
-## disable()
+## `is_enabled()`
 
-Disable the SDK and clean up resources.
-
-```python
-from botanu import disable
-
-disable() -> None
-```
-
-### Behaviour
-
-1. Flushes pending spans
-2. Shuts down span processors
-3. Disables instrumentation
-
----
-
-## is_enabled()
-
-Check if the SDK is currently enabled.
+Check if the SDK has been initialised.
 
 ```python
-from botanu import is_enabled
+import botanu
 
-is_enabled() -> bool
-```
-
-### Example
-
-```python
-if not is_enabled():
-    enable(service_name="my-service")
+if botanu.is_enabled():
+    ...
 ```
 
 ---

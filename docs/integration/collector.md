@@ -30,21 +30,11 @@ No collector configuration is needed on your side. Just set the API key:
 export BOTANU_API_KEY=<your-api-key>
 ```
 
-```python
-from botanu import enable
-
-enable()  # reads BOTANU_API_KEY from env
-```
+The SDK reads this at initialisation and routes OTLP exports to `https://ingest.botanu.ai`.
 
 ### Override endpoint (advanced)
 
 For development or testing against a local collector:
-
-```python
-enable(otlp_endpoint="http://localhost:4318")
-```
-
-Or via environment variable:
 
 ```bash
 export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318

@@ -77,10 +77,6 @@ with botanu.event(event_id=ticket.id, customer_id=user.id, workflow="Support"):
 
 Each step stamps `botanu.step=<name>` on its span and propagates it via baggage.
 
-## Auto-enable
-
-`event()` calls `botanu.enable()` implicitly on first use. Explicit `botanu.enable(...)` is only needed to override config (custom endpoint, API key, content-capture rate).
-
 ## See also
 
 - [Run Context](../concepts/run-context.md)

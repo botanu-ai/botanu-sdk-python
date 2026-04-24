@@ -37,7 +37,7 @@ with botanu.event(event_id=ticket.id, customer_id=user.id, workflow="Support"):
     agent.run(ticket)
 ```
 
-Every LLM call, HTTP call, and database query inside the block is captured and stamped with `event_id`, `customer_id`, and `workflow`. There's no separate `enable()` call — the SDK initializes itself on the first `event` call.
+Every LLM call, HTTP call, and database query inside the block is captured and stamped with `event_id`, `customer_id`, and `workflow`.
 
 ## Decorator form
 

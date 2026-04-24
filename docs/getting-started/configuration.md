@@ -24,21 +24,9 @@ For any other endpoint, the exporter ships without a bearer header. If your self
 
 ## Configuration precedence
 
-1. Code arguments to `enable()` or `BotanuConfig(...)`
-2. Environment variables (`BOTANU_*`, `OTEL_*`)
-3. YAML config file (`botanu.yaml` or a path you pass)
-4. Built-in defaults
-
-## Code
-
-```python
-import botanu
-
-botanu.enable(
-    service_name="my-service",
-    otlp_endpoint="https://ingest.botanu.ai",
-)
-```
+1. Environment variables (`BOTANU_*`, `OTEL_*`)
+2. YAML config file (`botanu.yaml` or a path you pass)
+3. Built-in defaults
 
 ## Environment variables
 
@@ -139,8 +127,6 @@ If you can't edit the entry point (third-party process runner, gunicorn preload)
 python -c "import botanu.register" -m your_app
 ```
 
-It calls `enable()` under the hood.
-
 ## Auto-instrumentation
 
 ### Default packages
@@ -159,19 +145,18 @@ It calls `enable()` under the hood.
 
 ### Customizing
 
-```python
-import botanu
-from botanu.sdk.config import BotanuConfig
+Set `BOTANU_AUTO_INSTRUMENT_PACKAGES` (comma-separated) or put the list in `botanu.yaml`:
 
-config = BotanuConfig(auto_instrument_packages=["requests", "fastapi", "openai_v2"])
-botanu.enable(config=config)
+```yaml
+auto_instrument_packages:
+  - requests
+  - fastapi
+  - openai_v2
 ```
 
 ### Disabling
 
-```python
-botanu.enable(auto_instrumentation=False)
-```
+Set `BOTANU_AUTO_INSTRUMENTATION=false` to skip auto-instrumentation entirely. Only do this if you've manually instrumented every library you care about.
 
 ## See also
 

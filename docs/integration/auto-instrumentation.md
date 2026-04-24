@@ -1,18 +1,19 @@
 # Auto-Instrumentation
 
-Botanu automatically instruments 50+ libraries with zero code changes.
+botanu automatically instruments 50+ libraries with zero code changes.
 
-## How It Works
+## How it works
 
-When you call `enable()`, the SDK detects which libraries are installed in your environment and instruments them automatically. Libraries that aren't installed are silently skipped.
+On first `botanu.event(...)` call, the SDK detects which libraries are installed in your environment and instruments them automatically. Libraries that aren't installed are silently skipped.
 
 ```python
-from botanu import enable
+import botanu
 
-enable()  # auto-instruments everything that's installed
+with botanu.event(event_id=ticket.id, customer_id=user.id, workflow="Support"):
+    agent.run(ticket)
 ```
 
-No configuration needed. No import order requirements. Just call `enable()` at startup.
+No configuration needed. No import order requirements.
 
 ## Supported Libraries
 

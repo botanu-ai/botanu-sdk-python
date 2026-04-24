@@ -17,7 +17,7 @@ with botanu.event(event_id=ticket.id, customer_id=user.id, workflow="Support"):
     agent.run(ticket)
 ```
 
-That single wrap captures every LLM call, HTTP call, and DB call the agent makes, and ties them to `event_id`. Authentication and endpoint setup come from `BOTANU_API_KEY` in the environment — no explicit `enable()` needed.
+That single wrap captures every LLM call, HTTP call, and DB call the agent makes, and ties them to `event_id`. Authentication and endpoint setup come from `BOTANU_API_KEY` in the environment.
 
 See [Quick Start](getting-started/quickstart.md) for the full five-minute walkthrough.
 

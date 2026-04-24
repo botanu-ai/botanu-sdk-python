@@ -13,16 +13,7 @@ and, via the verdict rollup, to accurate event-level outcome determination.
 
 ## The knob
 
-One config field turns the whole thing on:
-
-```python
-from botanu import enable
-from botanu.sdk.config import BotanuConfig
-
-enable(config=BotanuConfig(content_capture_rate=0.10))
-```
-
-Or via environment:
+One env var turns the whole thing on:
 
 ```bash
 export BOTANU_CONTENT_CAPTURE_RATE=0.10

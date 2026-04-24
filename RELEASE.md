@@ -94,8 +94,9 @@ python -c "import botanu; print(botanu.__version__)"
 
 # Run quick test
 python -c "
-from botanu import enable, botanu_workflow
-enable(service_name='test')
+import botanu
+with botanu.event(event_id='smoke-1', customer_id='smoke-cust', workflow='smoke-test'):
+    pass
 print('Botanu SDK loaded successfully!')
 "
 ```

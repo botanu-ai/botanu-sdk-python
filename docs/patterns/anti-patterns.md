@@ -112,23 +112,6 @@ with botanu.event(event_id=..., customer_id=..., workflow="Support"):
         botanu.emit_outcome(value_type="tickets_resolved", value_amount=1)
 ```
 
-## Calling `enable()` repeatedly
-
-`enable()` runs lazily on the first `botanu.event(...)` call. Calling it explicitly is only useful when you need to override config — a custom endpoint, an API key passed in code, a non-default content-capture rate. Calling `enable()` inside a request handler or library adds no value and can misconfigure the SDK.
-
-```python
-def handle_request(req):
-    botanu.enable()
-    with botanu.event(...):
-        ...
-```
-
-```python
-def handle_request(req):
-    with botanu.event(...):
-        ...
-```
-
 ## Putting secrets or PII in baggage
 
 Baggage travels in plaintext on every outbound HTTP request and through third-party HTTP middleware. User tokens, API keys, and PII should flow through your application's normal auth layer, not through `set_baggage`.
