@@ -454,12 +454,20 @@ class TestBotanuConfigAutoInstrument:
 class TestContentCaptureRate:
     """Tests for the content_capture_rate field."""
 
-    def test_default_is_zero(self):
-        """Privacy-safe default: no content captured unless explicitly enabled."""
+    def test_default_is_ten_percent(self):
+        """Default changed from 0.0 to 0.10 on 2026-04-24 (Codex P0 #1).
+
+        Pre-change: SDK worked out of the box except the evaluator judge
+        silently returned no test case for every span because the helper
+        methods (set_input_content / set_output_content) gated on rate > 0.0.
+        0.10 matches the docs' recommended production value; three PII-defense
+        layers (SDK scrub + collector credential scrub + Presidio NER) still
+        fire on every captured attribute.
+        """
         with mock.patch.dict(os.environ, {}, clear=True):
             os.environ.pop("BOTANU_CONTENT_CAPTURE_RATE", None)
             config = BotanuConfig()
-            assert config.content_capture_rate == 0.0
+            assert config.content_capture_rate == 0.10
 
     def test_explicit_value_respected(self):
         config = BotanuConfig(content_capture_rate=0.15)
@@ -486,7 +494,8 @@ class TestContentCaptureRate:
         """Invalid env values are ignored (default retained)."""
         with mock.patch.dict(os.environ, {"BOTANU_CONTENT_CAPTURE_RATE": "not_a_number"}):
             config = BotanuConfig()
-            assert config.content_capture_rate == 0.0
+            # Default since 2026-04-24 is 0.10, not 0.0.
+            assert config.content_capture_rate == 0.10
 
     def test_to_dict_roundtrip(self):
         config = BotanuConfig(content_capture_rate=0.1)

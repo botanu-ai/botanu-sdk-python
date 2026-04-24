@@ -19,7 +19,7 @@ from botanu.sdk.config import BotanuConfig
 | `auto_detect_resources` | `bool` | `True` | Auto-detect cloud resources |
 | `otlp_endpoint` | `str` | From env / auto-configured when `BOTANU_API_KEY` is set / `"http://localhost:4318"` | OTLP endpoint |
 | `otlp_headers` | `dict` | `None` | Custom headers for OTLP exporter — always honored |
-| `content_capture_rate` | `float` | `0.0` | Prompt/response capture rate (0.0–1.0). See [Content Capture](../tracking/content-capture.md). |
+| `content_capture_rate` | `float` | `0.10` | Prompt/response capture rate (0.0–1.0). Default 10% sample. See [Content Capture](../tracking/content-capture.md). |
 | `pii_scrub_enabled` | `bool` | `True` | In-process PII scrub of captured content |
 | `pii_scrub_use_presidio` | `bool` | `False` | Add Microsoft Presidio NER to the scrub pipeline |
 | `max_export_batch_size` | `int` | `512` | Max spans per batch |

@@ -126,14 +126,23 @@ class BotanuConfig:
     schedule_delay_millis: int = 5000
     export_timeout_millis: int = 30000
 
-    # Content capture for eval — 0.0 disables entirely (default, privacy-safe).
-    # Set to 1.0 for sandbox/shadow, 0.10-0.20 for production. Customers must also
-    # call set_input_content() / set_output_content() on their trackers; this rate
-    # gates whether those calls actually write to span attributes. In-process PII
-    # scrubbing runs on the captured text before it hits the span (see
-    # pii_scrub_* fields below); collector regex + evaluator Presidio NER
-    # remain belt-and-suspenders.
-    content_capture_rate: float = 0.0
+    # Content capture for eval — 0.10 default (~10% sample). Pre-2026-04-24
+    # this defaulted to 0.0, which meant the default install silently
+    # produced no judgeable content: set_input_content / set_output_content
+    # no-op'd, the L2 judge returned empty test cases, and eval rollups
+    # stayed pending forever. Customers had to read the docs AND flip a
+    # config flag before the "SDK in, eval out" loop worked at all.
+    #
+    # 0.10 is what the configuration docs recommend for production; it's
+    # enough traffic for the judge to have real cases while keeping PII
+    # exposure + storage cost bounded. Three PII-defense layers still
+    # fire on every captured attribute:
+    #   1. SDK in-process scrub (pii_scrub_enabled — default True below)
+    #   2. Collector credential-regex scrub on content attribute prefixes
+    #   3. Evaluator Presidio NER pass before judge calls
+    # Set to 1.0 for sandbox/shadow, 0.0 to fully disable (e.g. HIPAA
+    # where any content capture is a legal hazard).
+    content_capture_rate: float = 0.10
 
     # In-process PII scrubbing — runs on text passed to set_input_content /
     # set_output_content / set_retrieval_content before the span attribute is
@@ -424,7 +433,7 @@ class BotanuConfig:
             max_queue_size=export.get("queue_size", 65536),
             schedule_delay_millis=export.get("delay_ms", 5000),
             export_timeout_millis=export.get("export_timeout_ms", 30000),
-            content_capture_rate=max(0.0, min(1.0, float(eval_cfg.get("content_capture_rate", 0.0)))),
+            content_capture_rate=max(0.0, min(1.0, float(eval_cfg.get("content_capture_rate", 0.10)))),
             pii_scrub_enabled=bool(pii_cfg.get("enabled", True)),
             pii_scrub_disable_patterns=pii_cfg.get("disable_patterns"),
             pii_scrub_custom_patterns=pii_cfg.get("custom_patterns"),

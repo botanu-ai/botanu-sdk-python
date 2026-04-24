@@ -80,7 +80,7 @@ class BotanuConfig:
     schedule_delay_millis: int = 5000
     export_timeout_millis: int = 30000
 
-    content_capture_rate: float = 0.0
+    content_capture_rate: float = 0.10
 ```
 
 `BOTANU_API_KEY` is not a field on the dataclass — when the env var is set, `BotanuConfig` auto-configures `otlp_endpoint` + `otlp_headers` for the botanu-trusted endpoint.

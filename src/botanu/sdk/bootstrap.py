@@ -163,11 +163,22 @@ def enable(
         from botanu.sdk.config import _redact_url_credentials
 
         logger.info(
-            "Initializing Botanu SDK: service=%s, env=%s, endpoint=%s",
+            "Initializing Botanu SDK: service=%s, env=%s, endpoint=%s, content_capture_rate=%s",
             cfg.service_name,
             cfg.deployment_environment,
             _redact_url_credentials(traces_endpoint),
+            cfg.content_capture_rate,
         )
+        if cfg.content_capture_rate <= 0.0:
+            # Louder signal when the customer explicitly turned capture off —
+            # evaluator judge will no-op on every span. Not a failure, just a
+            # disable-by-choice worth flagging once at startup so a bug hunt
+            # for "why are eval rollups empty" ends here (Codex 2026-04-24 P0 #1).
+            logger.warning(
+                "Botanu content_capture_rate=0.0 — set_input_content / set_output_content "
+                "will not write span attributes, and the L2 evaluator judge will return "
+                "no test case for any span. See docs/tracking/content-capture.md to enable."
+            )
 
         try:
             from opentelemetry import trace
