@@ -1,417 +1,108 @@
 # Best Practices
 
-Patterns for effective cost attribution with Botanu SDK.
+Patterns that produce clean cost-per-outcome attribution and dashboards that stay readable over time.
 
-## Run Design
+## One event per business outcome
 
-### One Run Per Business Outcome
-
-A run should represent a complete business transaction:
+An event is one business transaction — a support ticket resolved, an order fulfilled, a document summarized. Use `botanu.step(...)` for internal phases so everything rolls up to a single outcome.
 
 ```python
-# GOOD - One run for one business outcome
-@botanu_workflow("process_order", event_id=order_id, customer_id=customer_id)
-async def process_order(order_id: str, customer_id: str):
-    data = await fetch_data(order_id)
-    result = await do_work(data)
-    emit_outcome("success", value_type="orders_processed", value_amount=1)
+import botanu
+
+with botanu.event(event_id=order.id, customer_id=order.customer_id, workflow="OrderFulfillment"):
+    with botanu.step("validate"):
+        validate(order)
+    with botanu.step("charge"):
+        charge_card(order)
+    with botanu.step("ship"):
+        create_shipment(order)
 ```
 
-```python
-# BAD - Multiple runs for one outcome
-@botanu_workflow("fetch_data", event_id=event_id, customer_id=customer_id)
-async def fetch_data(event_id: str, customer_id: str):
-    ...
+## Use real business IDs for `event_id`
 
-@botanu_workflow("do_work", event_id=event_id, customer_id=customer_id)  # Don't do this
-async def do_work(event_id: str, customer_id: str):
-    ...
+`event_id` is the join key. When a SoR webhook fires (Zendesk ticket reopened, Stripe refund issued) or an evaluator verdict lands, the server matches it against `event_id` to resolve the outcome. Pass the identifier your downstream systems already use — ticket ID, order ID, session ID.
+
+```python
+with botanu.event(event_id=ticket.id, customer_id=ticket.user_id, workflow="Support"):
+    agent.run(ticket)
 ```
 
-### Use Descriptive Workflow Names
-
-Workflow names appear in dashboards and queries. Choose names carefully:
+If your internal ID differs from the SoR ID, add the correlation explicitly:
 
 ```python
-# GOOD - Clear, descriptive names
-@botanu_workflow("support_resolution", event_id=event_id, customer_id=customer_id)
-@botanu_workflow("document_analysis", event_id=event_id, customer_id=customer_id)
-@botanu_workflow("lead_scoring", event_id=event_id, customer_id=customer_id)
-
-# BAD - Generic or technical names
-@botanu_workflow("handle", event_id=event_id, customer_id=customer_id)
-@botanu_workflow("process", event_id=event_id, customer_id=customer_id)
-@botanu_workflow("main", event_id=event_id, customer_id=customer_id)
+with botanu.event(event_id=session.id, customer_id=user.id, workflow="Support"):
+    botanu.set_correlation(zendesk_ticket_id=session.zendesk_ticket_id)
+    agent.run(session)
 ```
 
-## Outcome Recording
+## Pick stable, low-cardinality workflow names
 
-### Outcome is derived, not reported
-
-Event outcome is computed server-side from eval verdict rollup / HITL / SoR
-connector — not from `emit_outcome(status=...)`. The `status` argument is
-now a diagnostic helper only (it raises a `DeprecationWarning` on every
-call). You do **not** need to call `emit_outcome` to record success or
-failure; `@botanu_workflow` already creates the run and the platform will
-resolve its outcome.
-
-`emit_outcome` is still useful when you want to annotate the run with
-*diagnostic* context the dashboard can show alongside outcome:
+Workflow names drive filtering and grouping in the dashboard. Keep them stable across deployments and descriptive of the business purpose.
 
 ```python
-@botanu_workflow("process_data", event_id=data_id, customer_id=customer_id)
-async def process_data(data_id: str, customer_id: str):
-    try:
-        result = await process(data_id)
-        # Stamp value_type / value_amount for cost-per-value math.
-        emit_outcome("success", value_type="records_processed", value_amount=result.count)
-        return result
-    except ValidationError as exc:
-        # Stamp the reason/error_type so the dashboard can group failures.
-        emit_outcome("failed", reason="validation_error", error_type=type(exc).__name__)
-        raise
-    except TimeoutError:
-        emit_outcome("failed", reason="timeout", error_type="TimeoutError")
-        raise
+@botanu.event(workflow="Support", event_id=lambda t: t.id, customer_id=lambda t: t.user_id)
+def handle_ticket(ticket): ...
+
+@botanu.event(workflow="DocumentAnalysis", event_id=lambda d: d.id, customer_id=lambda d: d.tenant)
+def analyze_doc(doc): ...
 ```
 
-See [Outcomes](../tracking/outcomes.md) for the full list of diagnostic
-fields that still stamp.
+## Let OTel auto-instrumentation do the heavy lifting
 
-### Quantify Value When Possible
+Inside `botanu.event(...)`, the OTel auto-instrumentors already cover OpenAI, Anthropic, Vertex, LangChain, httpx, requests, SQLAlchemy, psycopg2, asyncpg, Redis, Celery, Kafka, and boto3. Each call automatically produces a span with the right semconv attributes and inherits the event's run context.
 
-Include value amounts for better ROI analysis:
+You only need `track_llm_call` or `track_db_operation` when:
+
+- The library you're calling isn't auto-instrumented (custom inference server, niche vector DB, proprietary queue).
+- You need to stamp semantic metrics the instrumentor doesn't capture, like `set_bytes_scanned` on a warehouse query.
+
+## Annotate business value
+
+Use `emit_outcome` to stamp diagnostic fields that the dashboard can render alongside cost-per-outcome. The authoritative outcome is resolved server-side; these fields add colour.
 
 ```python
-# GOOD - Quantified outcomes
-emit_outcome("success", value_type="items_sent", value_amount=50)
-emit_outcome("success", value_type="revenue_generated", value_amount=1299.99)
-emit_outcome("success", value_type="documents_processed", value_amount=10)
-
-# LESS USEFUL - No quantity
-emit_outcome("success")
+with botanu.event(event_id=ticket.id, customer_id=ticket.user_id, workflow="Support"):
+    resolved = agent.run(ticket)
+    if resolved:
+        botanu.emit_outcome(value_type="tickets_resolved", value_amount=1)
 ```
 
-### Use Consistent Value Types
-
-Standardize your value types across the organization:
+Quantified examples:
 
 ```python
-# Define standard value types
-class ValueTypes:
-    ITEMS_PROCESSED = "items_processed"
-    DOCUMENTS_ANALYZED = "documents_analyzed"
-    LEADS_SCORED = "leads_scored"
-    MESSAGES_SENT = "messages_sent"
-    REVENUE_GENERATED = "revenue_generated"
-
-# Use consistently
-emit_outcome("success", value_type=ValueTypes.ITEMS_PROCESSED, value_amount=1)
+botanu.emit_outcome(value_type="revenue_generated", value_amount=1299.99)
+botanu.emit_outcome(value_type="documents_processed", value_amount=10)
+botanu.emit_outcome(reason="rate_limit_exceeded", error_type="RateLimitError")
 ```
 
-### Include Reasons for Failures
-
-Always explain why something failed:
+## Multi-tenant apps: always pass `tenant_id`
 
 ```python
-emit_outcome("failed", reason="rate_limit_exceeded")
-emit_outcome("failed", reason="invalid_input")
-emit_outcome("failed", reason="model_unavailable")
-emit_outcome("failed", reason="context_too_long")
-```
-
-## LLM Tracking
-
-### Always Record Token Usage
-
-Tokens are the primary cost driver for LLMs:
-
-```python
-with track_llm_call(provider="openai", model="gpt-4") as tracker:
-    response = await client.chat.completions.create(...)
-    # Always set tokens
-    tracker.set_tokens(
-        input_tokens=response.usage.prompt_tokens,
-        output_tokens=response.usage.completion_tokens,
-    )
-```
-
-### Record Provider Request IDs
-
-Request IDs enable reconciliation with provider invoices:
-
-```python
-tracker.set_request_id(
-    provider_request_id=response.id,  # From provider
-    client_request_id=uuid.uuid4().hex,  # Your internal ID
-)
-```
-
-### Track Retries
-
-Record attempt numbers for accurate cost per success:
-
-```python
-for attempt in range(max_retries):
-    with track_llm_call(provider="openai", model="gpt-4") as tracker:
-        tracker.set_attempt(attempt + 1)
-        try:
-            response = await client.chat.completions.create(...)
-            break
-        except RateLimitError:
-            if attempt == max_retries - 1:
-                raise
-            await asyncio.sleep(backoff)
-```
-
-### Use Correct Operation Types
-
-Specify the operation type for accurate categorization:
-
-```python
-from botanu.tracking.llm import track_llm_call, ModelOperation
-
-# Chat completion
-with track_llm_call(provider="openai", model="gpt-4", operation=ModelOperation.CHAT):
-    ...
-
-# Embeddings
-with track_llm_call(provider="openai", model="text-embedding-3-small", operation=ModelOperation.EMBEDDINGS):
+with botanu.event(
+    event_id=request.id,
+    customer_id=request.user_id,
+    workflow="Support",
+    tenant_id=request.org_id,
+):
     ...
 ```
 
-## Data Tracking
+`tenant_id` propagates via baggage and appears as a filter dimension in the dashboard.
 
-### Track All Cost-Generating Operations
+## Configuration belongs in the environment
 
-Include databases, storage, and messaging:
-
-```python
-@botanu_workflow("run_pipeline", event_id=pipeline_id, customer_id=customer_id)
-async def run_pipeline(pipeline_id: str, customer_id: str):
-    # Track warehouse query (billed by bytes scanned)
-    with track_db_operation(system="snowflake", operation="SELECT") as db:
-        db.set_bytes_scanned(result.bytes_scanned)
-        db.set_query_id(result.query_id)
-
-    # Track storage operations (billed by requests + data)
-    with track_storage_operation(system="s3", operation="PUT") as storage:
-        storage.set_result(bytes_written=len(data))
-
-    # Track messaging (billed by message count)
-    with track_messaging_operation(system="sqs", operation="publish", destination="queue") as msg:
-        msg.set_result(message_count=batch_size)
-```
-
-### Include Bytes for Pay-Per-Scan Services
-
-For data warehouses billed by data scanned:
-
-```python
-with track_db_operation(system="bigquery", operation="SELECT") as db:
-    result = await bq_client.query(sql)
-    db.set_bytes_scanned(result.total_bytes_processed)
-    db.set_result(rows_returned=result.num_rows)
-```
-
-## Context Propagation
-
-### Use Middleware for Web Services
-
-Extract context from incoming requests:
-
-```python
-from fastapi import FastAPI
-from botanu.sdk.middleware import BotanuMiddleware
-
-app = FastAPI()
-app.add_middleware(BotanuMiddleware)
-```
-
-### Propagate Context in Message Queues
-
-Inject and extract context manually for async messaging:
-
-```python
-from botanu.sdk import set_baggage, get_baggage
-
-# Producer
-def publish_message(payload):
-    message = {
-        "payload": payload,
-        "baggage": {
-            "botanu.workflow": get_baggage("botanu.workflow"),
-            "botanu.event_id": get_baggage("botanu.event_id"),
-            "botanu.customer_id": get_baggage("botanu.customer_id"),
-        }
-    }
-    queue.publish(message)
-
-# Consumer
-def process_message(message):
-    baggage = message.get("baggage", {})
-    for key, value in baggage.items():
-        set_baggage(key, value)
-    do_work(message["payload"])
-```
-
-### Use Lean Mode for High-Traffic Systems
-
-Default lean mode minimizes header overhead:
-
-```python
-# Lean mode: ~100 bytes of baggage
-# Propagates: run_id, botanu.workflow
-
-# Full mode: ~300 bytes of baggage
-# Propagates: run_id, botanu.workflow, botanu.event_id, botanu.customer_id,
-#             environment, tenant_id, parent_run_id
-```
-
-## Configuration
-
-### Use Environment Variables in Production
-
-Keep configuration out of code:
+Keep secrets and endpoints out of code:
 
 ```bash
-export OTEL_SERVICE_NAME=my-service
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:4318
+export BOTANU_API_KEY=<from app.botanu.ai>
+export OTEL_SERVICE_NAME=support-service
 export BOTANU_ENVIRONMENT=production
 ```
 
-### Use YAML for Complex Configuration
+For multi-environment setups, a YAML file works too — see [Configuration](../getting-started/configuration.md).
 
-For multi-environment setups:
+## See also
 
-```yaml
-# config/production.yaml
-service:
-  name: ${OTEL_SERVICE_NAME}
-  environment: production
-
-otlp:
-  endpoint: ${COLLECTOR_ENDPOINT}
-
-propagation:
-  mode: lean
-```
-
-## Multi-Tenant Systems
-
-### Always Include Tenant ID
-
-For accurate per-tenant cost attribution:
-
-```python
-@botanu_workflow("handle_request", event_id=request_id, customer_id=cust_id, tenant_id=request.tenant_id)
-async def handle_request(request):
-    ...
-```
-
-### Use Business Context
-
-Add additional attribution dimensions via baggage:
-
-```python
-set_baggage("team", "engineering")
-set_baggage("cost_center", "R&D")
-set_baggage("region", "us-west-2")
-```
-
-## Error Handling
-
-### Record Errors Explicitly
-
-Don't lose error context:
-
-```python
-with track_llm_call(provider="openai", model="gpt-4") as tracker:
-    try:
-        response = await client.chat.completions.create(...)
-    except openai.APIError as e:
-        tracker.set_error(e)  # Records error type and message
-        raise
-```
-
-### Emit Outcomes for Errors
-
-Even failed runs should have outcomes:
-
-```python
-@botanu_workflow("process_data", event_id=data_id, customer_id=customer_id)
-async def process_data(data_id: str, customer_id: str):
-    try:
-        await do_work(data_id)
-        emit_outcome("success", value_type="items_processed", value_amount=1)
-    except ValidationError:
-        emit_outcome("failed", reason="validation_error")
-        raise
-    except Exception as e:
-        emit_outcome("failed", reason=type(e).__name__)
-        raise
-```
-
-## Performance
-
-### Use Async Tracking
-
-For async applications, ensure tracking is non-blocking:
-
-```python
-# The SDK uses span events, not separate API calls
-# This is already non-blocking
-with track_llm_call(provider="openai", model="gpt-4") as tracker:
-    response = await do_something()
-    tracker.set_tokens(...)  # Immediate, non-blocking
-```
-
-### Batch Database Tracking
-
-For batch operations, track at batch level:
-
-```python
-# GOOD - Batch tracking
-with track_db_operation(system="postgresql", operation="INSERT") as db:
-    await cursor.executemany(insert_sql, batch_of_1000_rows)
-    db.set_result(rows_affected=1000)
-
-# LESS EFFICIENT - Per-row tracking
-for row in batch_of_1000_rows:
-    with track_db_operation(system="postgresql", operation="INSERT") as db:
-        await cursor.execute(insert_sql, row)
-        db.set_result(rows_affected=1)
-```
-
-## Testing
-
-### Mock Tracing in Tests
-
-Use the NoOp tracer for unit tests:
-
-```python
-from opentelemetry import trace
-from opentelemetry.trace import NoOpTracerProvider
-
-def setup_test_tracing():
-    trace.set_tracer_provider(NoOpTracerProvider())
-```
-
-### Test Outcome Recording
-
-Verify outcomes are emitted correctly:
-
-```python
-from unittest.mock import patch
-
-def test_successful_outcome():
-    with patch("botanu.sdk.span_helpers.emit_outcome") as mock_emit:
-        result = await do_work("123")
-        mock_emit.assert_called_with("success", value_type="items_processed", value_amount=1)
-```
-
-## See Also
-
-- [Anti-Patterns](anti-patterns.md) - What to avoid
-- [Architecture](../concepts/architecture.md) - SDK design principles
-- [Configuration](../getting-started/configuration.md) - Configuration options
+- [Anti-Patterns](anti-patterns.md)
+- [Outcomes](../tracking/outcomes.md)
+- [Context Propagation](../concepts/context-propagation.md)

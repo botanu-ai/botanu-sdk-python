@@ -216,9 +216,8 @@ def enable(
             resource = Resource.create(resource_attrs)
 
             from opentelemetry.trace import ProxyTracerProvider
-            from botanu.processors import ResourceEnricher, SampledSpanProcessor
 
-            lean_mode = cfg.propagation_mode == "lean"
+            from botanu.processors import ResourceEnricher, SampledSpanProcessor
 
             botanu_exporter = OTLPSpanExporter(
                 endpoint=traces_endpoint,
@@ -287,7 +286,7 @@ def enable(
                         else:
                             provider.add_span_processor(proc)
 
-                provider.add_span_processor(RunContextEnricher(lean_mode=lean_mode))
+                provider.add_span_processor(RunContextEnricher())
                 if cfg.auto_instrument_resources:
                     provider.add_span_processor(ResourceEnricher())
                 provider.add_span_processor(botanu_batch)
@@ -312,7 +311,7 @@ def enable(
             elif isinstance(existing, ProxyTracerProvider):
                 # GREENFIELD: no real provider — create fresh
                 provider = TracerProvider(resource=resource, sampler=ALWAYS_ON)
-                provider.add_span_processor(RunContextEnricher(lean_mode=lean_mode))
+                provider.add_span_processor(RunContextEnricher())
                 if cfg.auto_instrument_resources:
                     provider.add_span_processor(ResourceEnricher())
                 provider.add_span_processor(botanu_batch)
@@ -330,7 +329,7 @@ def enable(
                     type(existing).__name__,
                 )
                 provider = TracerProvider(resource=resource, sampler=ALWAYS_ON)
-                provider.add_span_processor(RunContextEnricher(lean_mode=lean_mode))
+                provider.add_span_processor(RunContextEnricher())
                 if cfg.auto_instrument_resources:
                     provider.add_span_processor(ResourceEnricher())
                 provider.add_span_processor(botanu_batch)
@@ -350,9 +349,9 @@ def enable(
             # Set up LoggerProvider for outcome event emission
             try:
                 from opentelemetry._logs import set_logger_provider
+                from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
                 from opentelemetry.sdk._logs import LoggerProvider as _LoggerProvider
                 from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
-                from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 
                 logs_endpoint = cfg.otlp_endpoint
                 if logs_endpoint and not logs_endpoint.endswith("/v1/logs"):

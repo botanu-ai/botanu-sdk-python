@@ -5,42 +5,36 @@
 
 from __future__ import annotations
 
-import pytest
 from opentelemetry import trace
 
 from botanu.sdk.span_helpers import emit_outcome, set_business_context, set_correlation
 
 
 class TestEmitOutcome:
-    """emit_outcome is deprecated as an outcome-status signal but retained for
-    diagnostic fields. Status is validated but no longer stamped on the span.
+    """emit_outcome stamps diagnostic fields only. Authoritative event outcome
+    is resolved server-side from SoR connectors / HITL / eval verdict rollup.
     """
 
     def test_emit_outcome_does_not_stamp_status(self, memory_exporter):
-        """The status argument is validated but NOT emitted as
-        `botanu.outcome.status` — removed 2026-04-16."""
+        """There is no `botanu.outcome.status` attribute at all."""
         tracer = trace.get_tracer("test")
-        with pytest.warns(DeprecationWarning, match="trivially fakeable"):
-            with tracer.start_as_current_span("test-span"):
-                emit_outcome("success")
+        with tracer.start_as_current_span("test-span"):
+            emit_outcome(value_type="tickets_resolved", value_amount=1)
 
         spans = memory_exporter.get_finished_spans()
         attrs = dict(spans[0].attributes)
         assert "botanu.outcome.status" not in attrs
 
     def test_emit_outcome_emits_diagnostic_fields(self, memory_exporter):
-        """Diagnostic fields still stamp (reason, error_type, value_*, confidence)."""
         tracer = trace.get_tracer("test")
-        with pytest.warns(DeprecationWarning):
-            with tracer.start_as_current_span("test-span"):
-                emit_outcome(
-                    "failed",
-                    reason="timeout",
-                    error_type="TimeoutError",
-                    value_type="tickets_resolved",
-                    value_amount=5.0,
-                    confidence=0.95,
-                )
+        with tracer.start_as_current_span("test-span"):
+            emit_outcome(
+                reason="timeout",
+                error_type="TimeoutError",
+                value_type="tickets_resolved",
+                value_amount=5.0,
+                confidence=0.95,
+            )
 
         spans = memory_exporter.get_finished_spans()
         attrs = dict(spans[0].attributes)
@@ -49,47 +43,18 @@ class TestEmitOutcome:
         assert attrs.get("botanu.outcome.value_type") == "tickets_resolved"
         assert attrs.get("botanu.outcome.value_amount") == 5.0
         assert attrs.get("botanu.outcome.confidence") == 0.95
-        # Still NOT stamping status
-        assert "botanu.outcome.status" not in attrs
-
-    def test_emit_outcome_raises_on_invalid_status(self, memory_exporter):
-        """Status validation retained for backward compatibility."""
-        tracer = trace.get_tracer("test")
-        with tracer.start_as_current_span("test-span"):
-            with pytest.raises(ValueError, match="Invalid outcome status"):
-                emit_outcome("not_a_real_status")
 
     def test_emit_outcome_event_no_status_attr(self, memory_exporter):
-        """The `botanu.outcome_emitted` span event still fires for diagnostics
-        but does NOT carry `status` in its attributes."""
+        """The `botanu.outcome_emitted` span event fires for diagnostics and
+        does NOT carry `status` in its attributes."""
         tracer = trace.get_tracer("test")
-        with pytest.warns(DeprecationWarning):
-            with tracer.start_as_current_span("test-span"):
-                emit_outcome("success", value_type="orders", value_amount=1)
+        with tracer.start_as_current_span("test-span"):
+            emit_outcome(value_type="orders", value_amount=1)
 
         spans = memory_exporter.get_finished_spans()
         events = [e for e in spans[0].events if e.name == "botanu.outcome_emitted"]
         assert len(events) == 1
         assert "status" not in dict(events[0].attributes)
-
-    def test_emit_outcome_no_log_record(self, memory_exporter, log_exporter):
-        """The OTel log record path has been removed — no collector flush
-        trigger from emit_outcome any more (customer-push outcome deprecated)."""
-        from opentelemetry import baggage, context
-
-        tracer = trace.get_tracer("test")
-        ctx = baggage.set_baggage("botanu.event_id", "ticket-42", context=context.Context())
-        token = context.attach(ctx)
-        try:
-            with pytest.warns(DeprecationWarning):
-                with tracer.start_as_current_span("test-span"):
-                    emit_outcome("success")
-        finally:
-            context.detach(token)
-
-        logs = log_exporter.get_finished_logs()
-        # Event_id is set but the log emission is gone
-        assert len(logs) == 0
 
 
 class TestSetBusinessContext:

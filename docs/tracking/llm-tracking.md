@@ -1,14 +1,8 @@
 # LLM Tracking
 
-Track AI model usage for accurate cost attribution across providers.
+> **Most customers don't need this.** Inside `botanu.event(...)`, the OTel auto-instrumentors for OpenAI, Anthropic, Vertex AI, and LangChain already produce [GenAI semantic-convention](https://opentelemetry.io/docs/specs/semconv/gen-ai/) spans with `gen_ai.*` attributes and run-context stamping. Reach for `track_llm_call` only when the library you're calling isn't auto-instrumented (custom inference endpoint, self-hosted model server, proprietary SDK) or when you need to set content for eval manually.
 
-## Overview
-
-Botanu provides LLM tracking that aligns with [OpenTelemetry GenAI Semantic Conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/). This ensures compatibility with standard observability tooling while enabling detailed cost analysis.
-
-## Basic Usage
-
-### Context Manager (Recommended)
+## `track_llm_call`
 
 ```python
 from botanu.tracking.llm import track_llm_call
@@ -96,10 +90,13 @@ When capture fires, the SDK writes:
 | `botanu.eval.input_content` | `set_input_content(text)` |
 | `botanu.eval.output_content` | `set_output_content(text)` |
 
-**PII is not scrubbed in the SDK.** The collector runs a regex redaction pass
-and the evaluator runs Presidio NER before any captured text is stored.
-See [Content Capture](content-capture.md) for the full pipeline and for the
-workflow-level auto-capture path that `@botanu_workflow` provides.
+**PII is scrubbed in-process by default** before the attribute is written —
+regex patterns for email, phone, SSN, credit card, IPs, JWTs, and common API
+keys. Optional Presidio NER adds name/address/medical-term detection (install
+with `pip install botanu[pii-nlp]`). Collector regex + evaluator Presidio
+remain downstream as belt-and-suspenders. See
+[Content Capture](content-capture.md) for the full pipeline, opt-out knobs,
+and the event-level auto-capture path that `botanu.event(...)` provides.
 
 ### set_request_params()
 
@@ -314,38 +311,53 @@ The SDK automatically records these metrics:
 | `gen_ai.client.operation.duration` | Histogram | Operation duration in seconds |
 | `botanu.gen_ai.attempts` | Counter | Request attempts (including retries) |
 
-## Example: Multi-Provider Workflow
+## Example: multi-provider fallback
 
 ```python
-from botanu import botanu_workflow, emit_outcome
+from anthropic import AsyncAnthropic, RateLimitError
+from openai import AsyncOpenAI
+
+import botanu
 from botanu.tracking.llm import track_llm_call
 
-@botanu_workflow("process-with-fallback", event_id=event_id, customer_id=customer_id)
-async def process_with_fallback(data: str):
-    """Try one provider first, fall back to another."""
+anthropic = AsyncAnthropic()
+openai = AsyncOpenAI()
 
+
+@botanu.event(
+    workflow="process-with-fallback",
+    event_id=lambda data: data["id"],
+    customer_id=lambda data: data["customer_id"],
+)
+async def process_with_fallback(data):
     try:
         with track_llm_call(provider="anthropic", model="claude-3-opus") as tracker:
             tracker.set_attempt(1)
-            response = await do_work(data, provider="anthropic")
+            response = await anthropic.messages.create(
+                model="claude-3-opus-20240229",
+                max_tokens=1024,
+                messages=[{"role": "user", "content": data["prompt"]}],
+            )
             tracker.set_tokens(
                 input_tokens=response.usage.input_tokens,
                 output_tokens=response.usage.output_tokens,
             )
-            emit_outcome("success", value_type="items_processed", value_amount=1)
-            return response.content
+            botanu.emit_outcome(value_type="items_processed", value_amount=1)
+            return response.content[0].text
 
     except RateLimitError:
-        # Fallback to second provider
         with track_llm_call(provider="openai", model="gpt-4") as tracker:
             tracker.set_attempt(2)
-            response = await do_work(data, provider="openai")
+            response = await openai.chat.completions.create(
+                model="gpt-4",
+                messages=[{"role": "user", "content": data["prompt"]}],
+            )
             tracker.set_tokens(
                 input_tokens=response.usage.prompt_tokens,
                 output_tokens=response.usage.completion_tokens,
             )
-            emit_outcome("success", value_type="items_processed", value_amount=1)
-            return response.content
+            botanu.emit_outcome(value_type="items_processed", value_amount=1)
+            return response.choices[0].message.content
 ```
 
 ## See Also

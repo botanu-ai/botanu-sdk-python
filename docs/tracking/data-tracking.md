@@ -1,25 +1,17 @@
 # Data Tracking
 
-Track database, storage, and messaging operations for complete cost visibility.
+> **Most customers don't need this.** Inside `botanu.event(...)`, OTel auto-instrumentors for SQLAlchemy, psycopg2, asyncpg, pymongo, redis, boto3, celery, and kafka already produce spans with `db.*` / `messaging.*` attributes and run-context stamping. Reach for `track_db_operation` / `track_storage_operation` / `track_messaging_operation` only when the library you're calling isn't auto-instrumented (custom query layer, proprietary queue, niche data store) or when you need to set result metrics (rows returned, bytes scanned) that the instrumentor doesn't capture.
 
-## Overview
-
-Data operations often contribute significantly to AI workflow costs. Botanu provides tracking for:
-
-- **Databases** - SQL, NoSQL, data warehouses
-- **Object Storage** - S3, GCS, Azure Blob
-- **Messaging** - SQS, Kafka, Pub/Sub
-
-## Database Tracking
-
-### Basic Usage
+## `track_db_operation`
 
 ```python
+import asyncpg
 from botanu.tracking.data import track_db_operation
 
-with track_db_operation(system="postgresql", operation="SELECT") as db:
-    result = await cursor.execute("SELECT * FROM users WHERE active = true")
-    db.set_result(rows_returned=len(result))
+async with asyncpg.connect(dsn) as conn:
+    with track_db_operation(system="postgresql", operation="SELECT") as db:
+        rows = await conn.fetch("SELECT id FROM users WHERE active = true")
+        db.set_result(rows_returned=len(rows))
 ```
 
 ### DBTracker Methods
@@ -300,67 +292,83 @@ set_warehouse_metrics(
 )
 ```
 
-## Example: Complete Data Pipeline
+## Example: complete data pipeline
+
+Full working sketch: a batch ETL that scans Snowflake, runs an LLM per row, writes to S3, inserts into Postgres, and publishes to SQS.
 
 ```python
-from botanu import botanu_workflow, emit_outcome
+import json
+
+import asyncpg
+import boto3
+import snowflake.connector
+from openai import AsyncOpenAI
+
+import botanu
 from botanu.tracking.data import (
-    track_db_operation,
-    track_storage_operation,
-    track_messaging_operation,
     DBOperation,
+    track_db_operation,
+    track_messaging_operation,
+    track_storage_operation,
 )
 from botanu.tracking.llm import track_llm_call
 
-@botanu_workflow("etl-pipeline", event_id=batch_id, customer_id=customer_id)
-async def process_batch(batch_id: str):
-    """Complete ETL pipeline with cost tracking."""
+snow = snowflake.connector.connect(...)
+s3 = boto3.client("s3")
+sqs = boto3.client("sqs")
+openai = AsyncOpenAI()
+SQS_QUEUE_URL = "https://sqs.us-east-1.amazonaws.com/123/batch-complete"
 
-    # 1. Read from data warehouse
+
+@botanu.event(
+    workflow="etl-pipeline",
+    event_id=lambda batch_id, customer_id: batch_id,
+    customer_id=lambda batch_id, customer_id: customer_id,
+)
+async def process_batch(batch_id: str, customer_id: str):
     with track_db_operation(system="snowflake", operation=DBOperation.SELECT) as db:
         db.set_query_id(batch_id)
-        rows = await snowflake_client.execute(
-            "SELECT * FROM raw_data WHERE batch_id = %s",
-            batch_id
-        )
+        cur = snow.cursor()
+        cur.execute("SELECT id, payload FROM raw_data WHERE batch_id = %s", (batch_id,))
+        rows = cur.fetchall()
         db.set_result(rows_returned=len(rows))
-        db.set_bytes_scanned(rows.bytes_scanned)
 
-    # 2. Process with LLM
     processed = []
-    for row in rows:
+    for row_id, payload in rows:
         with track_llm_call(provider="openai", model="gpt-4") as llm:
-            result = await analyze_row(row)
-            llm.set_tokens(input_tokens=result.input_tokens, output_tokens=result.output_tokens)
-            processed.append(result)
+            resp = await openai.chat.completions.create(
+                model="gpt-4",
+                messages=[{"role": "user", "content": payload}],
+            )
+            llm.set_tokens(
+                input_tokens=resp.usage.prompt_tokens,
+                output_tokens=resp.usage.completion_tokens,
+            )
+            processed.append({"id": row_id, "result": resp.choices[0].message.content})
 
-    # 3. Write to storage
+    body = json.dumps(processed)
     with track_storage_operation(system="s3", operation="PUT") as storage:
         storage.set_bucket("processed-data")
-        await s3_client.put_object(
-            Bucket="processed-data",
-            Key=f"batch/{batch_id}.json",
-            Body=json.dumps(processed)
-        )
-        storage.set_result(bytes_written=len(json.dumps(processed)))
+        s3.put_object(Bucket="processed-data", Key=f"batch/{batch_id}.json", Body=body)
+        storage.set_result(bytes_written=len(body))
 
-    # 4. Write to database
-    with track_db_operation(system="postgresql", operation=DBOperation.INSERT) as db:
-        await pg_client.executemany(
-            "INSERT INTO processed_data VALUES (%s, %s, %s)",
-            [(r.id, r.result, r.score) for r in processed]
-        )
-        db.set_result(rows_affected=len(processed))
+    async with asyncpg.create_pool(dsn="postgresql://localhost/db") as pool:
+        async with pool.acquire() as conn:
+            with track_db_operation(system="postgresql", operation=DBOperation.INSERT) as db:
+                await conn.executemany(
+                    "INSERT INTO processed_data(id, result) VALUES ($1, $2)",
+                    [(r["id"], r["result"]) for r in processed],
+                )
+                db.set_result(rows_affected=len(processed))
 
-    # 5. Publish completion event
     with track_messaging_operation(system="sqs", operation="publish", destination="batch-complete") as msg:
-        await sqs_client.send_message(
-            QueueUrl=queue_url,
-            MessageBody=json.dumps({"batch_id": batch_id, "count": len(processed)})
+        sqs.send_message(
+            QueueUrl=SQS_QUEUE_URL,
+            MessageBody=json.dumps({"batch_id": batch_id, "count": len(processed)}),
         )
         msg.set_result(message_count=1)
 
-    emit_outcome("success", value_type="batches_processed", value_amount=1)
+    botanu.emit_outcome(value_type="batches_processed", value_amount=1)
     return processed
 ```
 

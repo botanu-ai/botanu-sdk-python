@@ -44,15 +44,15 @@ each capture point — the SDK does not coordinate across processes.
 
 ### 1. Workflow-level (automatic, once per run)
 
-`@botanu_workflow` will capture the decorated function's bound arguments as
+`botanu.event` will capture the decorated function's bound arguments as
 input and its return value as output, **once per run**, when
 `content_capture_rate` fires.
 
 ```python
-from botanu import botanu_workflow
+import botanu
 
-@botanu_workflow(
-    "summarize",
+@botanu.event(
+    workflow="summarize",
     event_id=lambda req: req.id,
     customer_id=lambda req: req.tenant,
 )
@@ -103,8 +103,8 @@ expose optional content setters that respect the same rate. See
 
 | Attribute | Written by | Source |
 | --- | --- | --- |
-| `botanu.eval.input_content` | `@botanu_workflow` | Bound function arguments (JSON) |
-| `botanu.eval.output_content` | `@botanu_workflow` | Return value (JSON) |
+| `botanu.eval.input_content` | `botanu.event` | Bound function arguments (JSON) |
+| `botanu.eval.output_content` | `botanu.event` | Return value (JSON) |
 | `botanu.eval.input_content` | `LLMTracker.set_input_content()` | Explicit prompt text |
 | `botanu.eval.output_content` | `LLMTracker.set_output_content()` | Explicit response text |
 
@@ -112,16 +112,77 @@ All values are truncated to 4096 characters before being stamped.
 
 ## PII handling
 
-The SDK **does not scrub PII**. Scrubbing happens downstream:
+The SDK scrubs PII **in-process** before a span attribute is written. This is
+on by default — you do not need to configure anything to get it. Downstream
+collector + evaluator passes remain as belt-and-suspenders.
 
-1. **Collector** — runs a regex redaction pass on `botanu.eval.*` attributes
-   (credit-card, email, phone, API-key patterns) before forwarding.
-2. **Evaluator** — runs a Microsoft Presidio NER pass before storing captured
-   text against the eval record.
+Pipeline for every captured string:
 
-If you have strict PII requirements, keep `content_capture_rate=0.0` and
-drive eval off explicit tool/score annotations instead. The capture pipeline
-is opt-in precisely so you can stay private by default.
+```text
+customer text
+    ↓
+content_capture_rate gate           (skip capture entirely)
+    ↓
+regex scrub (default patterns)      # src/botanu/sdk/pii.py
+    ↓
+optional Presidio NER               # pip install botanu[pii-nlp]
+    ↓
+truncate to max_chars (4096)
+    ↓
+span.set_attribute("botanu.eval.*_content", ...)
+```
+
+### Built-in regex patterns
+
+Email, phone (E.164 + US), SSN, credit card (Luhn-validated), IPv4/IPv6,
+JWT, bearer tokens, and common API-key prefixes (AWS `AKIA…`, GitHub
+`ghp_…`, Stripe `sk_live_…`, Slack `xoxb-…`, OpenAI `sk-…`,
+Anthropic `sk-ant-…`).
+
+Matches are replaced with `[REDACTED]` by default.
+
+### Configuration
+
+```yaml
+eval:
+  content_capture_rate: 0.2
+  pii:
+    enabled: true               # default — opt-out is explicit
+    disable_patterns: [ipv4]    # turn off specific built-ins
+    custom_patterns:
+      employee_id: 'EMP-\d{6}'
+    use_presidio: false         # set true to add NER on top
+    replacement: "[REDACTED]"
+```
+
+Or via env:
+
+| Var | Default | Notes |
+| --- | --- | --- |
+| `BOTANU_PII_SCRUB_ENABLED` | `true` | Set to `false` to opt out |
+| `BOTANU_PII_SCRUB_DISABLE_PATTERNS` | unset | Comma-separated names |
+| `BOTANU_PII_SCRUB_USE_PRESIDIO` | `false` | Requires the `pii-nlp` extra |
+| `BOTANU_PII_SCRUB_REPLACEMENT` | `[REDACTED]` | Any string |
+
+### Presidio NER (optional)
+
+For name/address/medical-term detection, install the optional extra:
+
+```bash
+pip install botanu[pii-nlp]
+```
+
+…and set `pii_scrub_use_presidio=true`. Without the package installed, the
+flag is a no-op and the regex pass continues to run (you get a warning log
+on first use). Entities covered: `EMAIL_ADDRESS`, `PHONE_NUMBER`,
+`CREDIT_CARD`, `US_SSN`, `PERSON`, `LOCATION`, `IP_ADDRESS`,
+`US_BANK_NUMBER`, `MEDICAL_LICENSE`.
+
+### If you need stricter privacy
+
+Keep `content_capture_rate=0.0` and drive eval off explicit tool/score
+annotations instead. The capture pipeline is opt-in precisely so you can
+stay private by default.
 
 ## Verifying capture is on
 
@@ -133,7 +194,7 @@ attributes. If they are absent, check in order:
 1. `BotanuConfig.content_capture_rate` is actually > 0.0 in the running
    process (`BotanuConfig.from_yaml(...)` and env precedence can surprise
    you — print `get_config().content_capture_rate` to be sure).
-2. You are inside a span (`@botanu_workflow` or `track_llm_call` scope).
+2. You are inside a span (`botanu.event` or `track_llm_call` scope).
 3. The random gate didn't miss — at `rate=0.1`, ~90% of calls will look
    empty. Set the rate to `1.0` temporarily to confirm plumbing.
 

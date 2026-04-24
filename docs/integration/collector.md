@@ -7,7 +7,7 @@ Botanu hosts a multi-tenant OpenTelemetry Collector — you don't need to deploy
 The SDK sends telemetry to Botanu's hosted collector via OTLP over HTTPS. The collector handles:
 
 - **Tenant isolation** — API key in the OTLP Authorization header identifies your tenant
-- **PII scrubbing** — Configurable redaction of sensitive data patterns
+- **PII scrubbing (belt-and-suspenders)** — Regex pass over `botanu.eval.*` attributes; the SDK already scrubs captured content in-process before it leaves your application
 - **Enrichment** — Vendor normalization, span classification
 - **Aggregation** — Event-level accumulation (spans → run summaries)
 - **Cost computation** — Token-to-dollar conversion using the pricing rate card
@@ -86,13 +86,23 @@ Dashboard (app.botanu.ai)
 
 ## PII Handling
 
-The collector applies PII scrubbing rules before data is stored. By default:
+PII scrubbing runs in **two layers** — the SDK strips captured content
+in-process (your application sees only `[REDACTED]` in exported spans),
+and the collector runs a second regex pass as belt-and-suspenders.
+
+**SDK (in-process, first line of defense):**
+
+- Runs on text passed to `set_input_content` / `set_output_content` /
+  `set_retrieval_content` and on `botanu.event(...)` auto-captured payloads
+- On by default — opt-out via `BOTANU_PII_SCRUB_ENABLED=false`
+- See [Content Capture → PII handling](../tracking/content-capture.md#pii-handling)
+
+**Collector (belt-and-suspenders):**
 
 - Email addresses, phone numbers, SSNs, and credit card numbers are redacted
 - Raw prompt/completion content is stripped (token counts are preserved for cost)
 - Only aggregated summaries (cost, latency, token counts, outcome status) are stored
-
-Configure additional scrubbing rules via the dashboard at **Settings → Data Privacy**.
+- Configure additional scrubbing rules via the dashboard at **Settings → Data Privacy**
 
 ## Sampling
 

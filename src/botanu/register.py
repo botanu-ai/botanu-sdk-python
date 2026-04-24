@@ -23,7 +23,7 @@ Usage::
     uvicorn app:app --env-file .env
 
     # Or in Dockerfile
-    ENV BOTANU_API_KEY=btnu_live_...
+    ENV BOTANU_API_KEY=<your key from app.botanu.ai>
     ENV BOTANU_SERVICE_NAME=my-service
     CMD ["python", "-c", "import botanu.register; import uvicorn; uvicorn.run('app:app')"]
 

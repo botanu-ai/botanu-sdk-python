@@ -14,7 +14,7 @@ from botanu.sdk.context import (
     get_workflow,
     set_baggage,
 )
-from botanu.sdk.decorators import botanu_outcome, botanu_workflow, run_botanu, workflow
+from botanu.sdk.decorators import event, step
 from botanu.sdk.span_helpers import (
     emit_outcome,
     set_business_context,
@@ -23,20 +23,18 @@ from botanu.sdk.span_helpers import (
 
 __all__ = [
     "BotanuConfig",
-    "botanu_outcome",
-    "botanu_workflow",
     "disable",
     "emit_outcome",
     "enable",
+    "event",
     "get_baggage",
     "get_config",
     "get_current_span",
     "get_run_id",
     "get_workflow",
     "is_enabled",
-    "run_botanu",
     "set_baggage",
     "set_business_context",
     "set_correlation",
-    "workflow",
+    "step",
 ]

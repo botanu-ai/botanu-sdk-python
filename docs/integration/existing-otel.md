@@ -132,9 +132,8 @@ In the parallel path:
   `trace.set_tracer_provider(...)`.
 - ddtrace keeps handling spans for ddtrace decorators and for Datadog
   auto-instrumentation.
-- botanu's decorators (`@botanu_workflow`, `track_llm_call`, etc.) get
-  their spans from the botanu provider, which forwards to the botanu
-  collector.
+- botanu's API (`botanu.event`, `track_llm_call`, etc.) gets its spans
+  from the botanu provider, which forwards to the botanu collector.
 
 The two tracing systems coexist. Nothing is stolen, nothing is wrapped.
 
@@ -169,28 +168,25 @@ first-time users.
 
 ---
 
-## Using botanu decorators
+## Using the botanu API
 
-Regardless of which path `enable()` takes, the decorator API is the same:
+Regardless of which path `enable()` takes, the API is the same:
 
 ```python
-from botanu import botanu_workflow, emit_outcome
+import botanu
 
-@botanu_workflow(
-    name="Customer Support",
+@botanu.event(
+    workflow="Customer Support",
     event_id=lambda req: req.ticket_id,
     customer_id=lambda req: req.org_id,
 )
 async def handle_ticket(req):
     result = await process(req)
-    emit_outcome("success", value_type="tickets_resolved", value_amount=1)
+    botanu.emit_outcome(value_type="tickets_resolved", value_amount=1)
     return result
 ```
 
-Auto-instrumented spans (OpenAI SDK, HTTP clients, DB drivers) inside the
-decorated call inherit the run context through W3C Baggage, so cost
-attribution works even for spans your code never directly creates. See
-[Auto-Instrumentation](auto-instrumentation.md).
+Auto-instrumented spans (OpenAI SDK, HTTP clients, DB drivers) inside the event scope inherit the run context through [W3C Baggage](https://www.w3.org/TR/baggage/), so cost attribution works even for spans your code never directly creates. See [Auto-Instrumentation](auto-instrumentation.md).
 
 ---
 
@@ -248,7 +244,7 @@ Sanity checks in order:
 
 1. Open your existing APM — confirm span volume is unchanged.
 2. Open botanu — confirm spans are arriving. A run created by
-   `@botanu_workflow` carries `botanu.run_id`, `botanu.workflow`,
+   `botanu.event(...)` carries `botanu.run_id`, `botanu.workflow`,
    `botanu.event_id`.
 3. If both arrive, you're done.
 
@@ -284,7 +280,7 @@ line starting `Preserved your sampling ratio`.
 
 1. Verify `enable()` was called (or `RunContextEnricher` was attached
    manually).
-2. Verify an entry-point function is wrapped in `@botanu_workflow` — the
+2. Verify an entry-point function or block uses `botanu.event(...)` — the
    baggage is set on entry and inherited by child spans from there.
 3. Verify the W3C Baggage propagator is active:
    `from opentelemetry import propagate; propagate.get_global_textmap()`

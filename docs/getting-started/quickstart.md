@@ -1,119 +1,97 @@
 # Quickstart
 
-Get event-level cost attribution working in 5 minutes.
+Get event-level cost attribution working in five minutes.
 
 ## Prerequisites
 
-- Python 3.9+
-- A botanu API key (sign up at [botanu.ai](https://botanu.ai))
+- Python 3.9 or newer
+- A botanu API key from [app.botanu.ai](https://app.botanu.ai)
 
-## Step 1: Install
+## 1. Install
 
 ```bash
 pip install botanu
 ```
 
-## Step 2: Set one environment variable
+## 2. Set the API key
 
 ```bash
 export BOTANU_API_KEY=<your-api-key>
 ```
 
-That's it for the Botanu Cloud SaaS. The SDK auto-configures the OTLP
-endpoint to `https://ingest.botanu.ai` and attaches your API key as a
-bearer token.
+The SDK auto-configures the OTLP endpoint to `https://ingest.botanu.ai` and sends the key as a bearer token.
 
-### Alternative — self-hosted or local collector
-
-If you run your own OTel collector, point at it explicitly:
+Running your own collector instead? Point at it directly and skip the bearer header:
 
 ```bash
 export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
 export OTEL_SERVICE_NAME=my-service
 ```
 
-See [Collector](../integration/collector.md). Note: the SDK does not
-attach your `BOTANU_API_KEY` to non-botanu endpoints — set
-`OTEL_EXPORTER_OTLP_HEADERS` if your self-hosted collector needs auth.
-
-## Step 3: Enable SDK
+## 3. Wrap your agent
 
 ```python
-from botanu import enable
+import botanu
 
-enable()
+with botanu.event(event_id=ticket.id, customer_id=user.id, workflow="Support"):
+    agent.run(ticket)
 ```
 
-Call `enable()` once at application startup. It reads configuration from environment variables — no hardcoded values needed.
+Every LLM call, HTTP call, and database query inside the block is captured and stamped with `event_id`, `customer_id`, and `workflow`. There's no separate `enable()` call — the SDK initializes itself on the first `event` call.
 
-> **Already using Datadog or another OTel APM?** `enable()` auto-detects
-> your existing TracerProvider and adds botanu alongside without
-> disturbing your sampling ratio or APM bill. See [Using botanu with an
-> existing OTel / APM setup](../integration/existing-otel.md).
+## Decorator form
 
-## Step 4: Define Entry Point
+For long-lived handlers, a decorator reads cleaner:
 
 ```python
-from botanu import botanu_workflow
+import botanu
 
-@botanu_workflow("my-workflow", event_id="evt-001", customer_id="cust-42")
-async def do_work():
-    data = await db.query(...)
-    result = await llm.complete(data)
-    return result
-```
-
-All LLM calls, database queries, and HTTP requests inside the function are automatically tracked with the same `run_id` tied to the `event_id`.
-
-## Complete Example
-
-**Entry service** (`entry/app.py`):
-
-```python
-from botanu import enable, botanu_workflow
-
-enable()
-
-@botanu_workflow(
-    "my-workflow",
-    event_id=lambda req: req.event_id,
-    customer_id=lambda req: req.customer_id,
+@botanu.event(
+    workflow="Support",
+    event_id=lambda ticket: ticket.id,
+    customer_id=lambda ticket: ticket.user_id,
 )
-async def handle_request(req):
-    data = await fetch_data(req)
-    return await process(data)
+def handle_ticket(ticket):
+    return agent.run(ticket)
 ```
 
-No `emit_outcome("success")` call is needed — event outcome is resolved
-server-side from eval verdict / HITL / SoR. See [Outcomes](../tracking/outcomes.md).
+Works for both sync and `async def` functions.
 
-**Downstream service** (`intermediate/app.py`):
+## Multi-phase workflows
+
+Break a multi-step event into phases with `step`:
 
 ```python
-from botanu import enable
-
-enable()  # propagates run_id from incoming request — no decorator needed
+with botanu.event(event_id=ticket.id, customer_id=user.id, workflow="Support"):
+    with botanu.step("retrieval"):
+        docs = vector_db.query(ticket.query)
+    with botanu.step("generation"):
+        response = llm.complete(docs)
 ```
 
-## What Gets Tracked
+Each phase produces its own span and inherits the event's business context.
 
-| Attribute | Example | Description |
-|-----------|---------|-------------|
-| `botanu.run_id` | `019abc12-...` | Unique run identifier (UUIDv7) |
-| `botanu.workflow` | `my-workflow` | Workflow name |
-| `botanu.event_id` | `evt-001` | Business event identifier |
-| `botanu.customer_id` | `cust-42` | Customer identifier |
-| `gen_ai.usage.input_tokens` | `150` | LLM input tokens |
-| `gen_ai.usage.output_tokens` | `200` | LLM output tokens |
-| `db.system` | `postgresql` | Database system |
+## What gets stamped on every span
 
-All spans across all services share the same `run_id`, enabling cost-per-event analytics.
+| Attribute | Example |
+| --- | --- |
+| `botanu.run_id` | `019abc12-3f4d-7...` |
+| `botanu.event_id` | `ticket-42` |
+| `botanu.customer_id` | `acme-corp` |
+| `botanu.workflow` | `Support` |
+| `botanu.environment` | `production` |
+| `gen_ai.usage.input_tokens` | `150` |
+| `gen_ai.usage.output_tokens` | `200` |
 
-## Next Steps
+All spans produced by auto-instrumentation (OpenAI, Anthropic, LangChain, httpx, SQLAlchemy, Redis, ~25 others) inherit these attributes automatically.
 
-- [Configuration](configuration.md) — environment variables and YAML config
-- [Using botanu with existing OTel / Datadog](../integration/existing-otel.md) — brownfield detection + sampling preservation
-- [Content Capture](../tracking/content-capture.md) — enabling prompt/response capture for eval
-- [Outcomes](../tracking/outcomes.md) — how event outcome is resolved
-- [Kubernetes Deployment](../integration/kubernetes.md) — zero-code instrumentation at scale
-- [Context Propagation](../concepts/context-propagation.md) — how run_id flows across services
+## Already using Datadog or another OTel APM?
+
+The SDK detects existing `TracerProvider` setups and adds itself alongside without disturbing your sampling ratio. See [Coexisting with existing OTel / Datadog](../integration/existing-otel.md).
+
+## Next
+
+- [Configuration](configuration.md) — env vars, YAML, and advanced options
+- [Concepts: Run Context](../concepts/run-context.md) — what `event_id` buys you
+- [Outcomes](../tracking/outcomes.md) — how success/failure is resolved
+- [Kubernetes Deployment](../integration/kubernetes.md)

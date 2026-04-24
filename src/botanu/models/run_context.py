@@ -212,22 +212,30 @@ class RunContext:
     # Serialisation
     # ------------------------------------------------------------------
 
-    def to_baggage_dict(self, lean_mode: Optional[bool] = None) -> Dict[str, str]:
-        """Convert to dict for W3C Baggage propagation."""
-        if lean_mode is None:
-            env_mode = os.getenv("BOTANU_PROPAGATION_MODE", "lean")
-            lean_mode = env_mode != "full"
+    def to_baggage_dict(self) -> Dict[str, str]:
+        """Convert to dict for W3C Baggage propagation.
 
+        Always present: ``botanu.run_id``, ``botanu.workflow``,
+        ``botanu.event_id``, ``botanu.customer_id``, ``botanu.environment``.
+
+        Included when set on the context: ``botanu.tenant_id``,
+        ``botanu.parent_run_id``, ``botanu.root_run_id`` (if non-root),
+        ``botanu.attempt`` (if > 1), ``botanu.retry_of_run_id``,
+        ``botanu.deadline``, ``botanu.cancelled``.
+
+        The :class:`RunContextEnricher` stamps only the first seven
+        (run_id, workflow, event_id, customer_id, environment, tenant_id,
+        parent_run_id) on downstream spans. The remaining keys are for
+        :meth:`from_baggage` to reconstruct retry/deadline state on the
+        receiving side of cross-process propagation (e.g. message queues).
+        """
         baggage: Dict[str, str] = {
             "botanu.run_id": self.run_id,
             "botanu.workflow": self.workflow,
             "botanu.event_id": self.event_id,
             "botanu.customer_id": self.customer_id,
+            "botanu.environment": self.environment,
         }
-        if lean_mode:
-            return baggage
-
-        baggage["botanu.environment"] = self.environment
         if self.tenant_id:
             baggage["botanu.tenant_id"] = self.tenant_id
         if self.parent_run_id:

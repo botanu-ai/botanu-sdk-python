@@ -5,15 +5,22 @@
 
 Quick Start::
 
-    from botanu import enable, botanu_workflow, emit_outcome
+    import botanu
 
-    enable()  # reads config from OTEL_SERVICE_NAME, OTEL_EXPORTER_OTLP_ENDPOINT env vars
+    botanu.enable()  # reads OTEL_SERVICE_NAME, OTEL_EXPORTER_OTLP_ENDPOINT env vars
 
-    @botanu_workflow(name="Customer Support")
-    async def handle_request(data):
-        result = await process(data)
-        emit_outcome("success", value_type="tickets_resolved", value_amount=1)
-        return result
+    # One wrap around the agent entrypoint captures every LLM/HTTP/DB call.
+    with botanu.event(event_id=ticket.id, customer_id=user.id, workflow="Support"):
+        agent.run(ticket)
+
+    # Or as a decorator, with lambda extractors from the function args:
+    @botanu.event(
+        workflow="Support",
+        event_id=lambda t: t.id,
+        customer_id=lambda t: t.user_id,
+    )
+    def handle_ticket(ticket):
+        ...
 """
 
 from __future__ import annotations
@@ -45,11 +52,11 @@ from botanu.sdk.context import (
     set_baggage,
 )
 
-# Decorators  (primary integration point)
-from botanu.sdk.decorators import botanu_workflow, run_botanu, workflow
+# Primary integration API
+from botanu.sdk.decorators import event, step
 
 # Span helpers
-from botanu.sdk.span_helpers import emit_outcome, set_business_context
+from botanu.sdk.span_helpers import emit_outcome, set_business_context, set_correlation
 
 __all__ = [
     "__version__",
@@ -59,13 +66,13 @@ __all__ = [
     "is_enabled",
     # Configuration
     "BotanuConfig",
-    # Decorators / context managers
-    "botanu_workflow",
-    "run_botanu",
-    "workflow",
+    # Primary API
+    "event",
+    "step",
     # Span helpers
     "emit_outcome",
     "set_business_context",
+    "set_correlation",
     "get_current_span",
     # Context
     "get_run_id",

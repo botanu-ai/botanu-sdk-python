@@ -150,36 +150,22 @@ class TestRunContextOutcome:
 class TestRunContextSerialization:
     """Tests for baggage and span attribute serialization."""
 
-    def test_to_baggage_dict_lean_mode(self):
-        with mock.patch.dict(os.environ, {"BOTANU_PROPAGATION_MODE": "lean"}):
-            ctx = RunContext.create(
-                workflow="Customer Support",
-                event_id="ticket-42",
-                customer_id="bigretail",
-                tenant_id="tenant-123",
-            )
-            baggage = ctx.to_baggage_dict()
+    def test_to_baggage_dict_includes_all_keys(self):
+        """to_baggage_dict always returns all context keys — there is no lean mode."""
+        ctx = RunContext.create(
+            workflow="Customer Support",
+            event_id="ticket-42",
+            customer_id="bigretail",
+            tenant_id="tenant-123",
+        )
+        baggage = ctx.to_baggage_dict()
 
-            # Lean mode includes run_id, workflow, event_id, customer_id
-            assert "botanu.run_id" in baggage
-            assert "botanu.workflow" in baggage
-            assert baggage["botanu.event_id"] == "ticket-42"
-            assert baggage["botanu.customer_id"] == "bigretail"
-            assert "botanu.tenant_id" not in baggage
-
-    def test_to_baggage_dict_full_mode(self):
-        with mock.patch.dict(os.environ, {"BOTANU_PROPAGATION_MODE": "full"}):
-            ctx = RunContext.create(
-                workflow="Customer Support",
-                event_id="ticket-42",
-                customer_id="bigretail",
-                tenant_id="tenant-123",
-            )
-            baggage = ctx.to_baggage_dict()
-
-            assert baggage["botanu.event_id"] == "ticket-42"
-            assert baggage["botanu.customer_id"] == "bigretail"
-            assert baggage["botanu.tenant_id"] == "tenant-123"
+        assert "botanu.run_id" in baggage
+        assert baggage["botanu.workflow"] == "Customer Support"
+        assert baggage["botanu.event_id"] == "ticket-42"
+        assert baggage["botanu.customer_id"] == "bigretail"
+        assert baggage["botanu.tenant_id"] == "tenant-123"
+        assert "botanu.environment" in baggage
 
     def test_to_span_attributes(self):
         ctx = RunContext.create(
@@ -218,7 +204,7 @@ class TestRunContextSerialization:
             customer_id="bigretail",
             tenant_id="tenant-abc",
         )
-        baggage = original.to_baggage_dict(lean_mode=False)
+        baggage = original.to_baggage_dict()
         restored = RunContext.from_baggage(baggage)
 
         assert restored is not None

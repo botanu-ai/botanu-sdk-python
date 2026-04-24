@@ -9,8 +9,8 @@ For organizations with thousands of applications, modifying code in every repo i
 ## What Requires Code Changes
 
 | Service Type | Code Change | Config Change |
-|--------------|-------------|---------------|
-| **Entry point** | `@botanu_workflow` decorator (generates `run_id`) | K8s annotation |
+| --- | --- | --- |
+| **Entry point** | `botanu.event(...)` wrap (generates `run_id`) | K8s annotation |
 | **Intermediate services** | None | K8s annotation only |
 
 **Entry point** = The service where the business transaction starts (API gateway, webhook handler, queue consumer).
@@ -38,8 +38,8 @@ With zero-code instrumentation, the following are automatically traced:
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐             │
 │  │ App A       │  │ App B       │  │ App C       │             │
 │  │ (entry)     │  │ (no change) │  │ (no change) │             │
-│  │ @botanu_    │  │             │  │             │             │
-│  │  workflow   │  │             │  │             │             │
+│  │ botanu.     │  │             │  │             │             │
+│  │  event(...) │  │             │  │             │             │
 │  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘             │
 │         │                │                │                     │
 │         │    OTel auto-injected via Operator                   │
@@ -247,23 +247,24 @@ spec:
 
 ## Entry Point Service (Code Change Required)
 
-The entry point service is the **only** service that needs a code change. It must use `@botanu_workflow` to generate the `run_id`:
+The entry point service is the **only** service that needs a code change. It must wrap the request handler with `botanu.event(...)` so the `run_id` and business context are generated:
 
 ```python
-from botanu import enable, botanu_workflow
+import botanu
 
-enable(service_name="entry-service")
-
-@botanu_workflow("do_work", event_id=event_id, customer_id=customer_id)
-def do_work(event_id: str, customer_id: str):
-    data = do_something()
-    result = process(data)
-    return result
+@botanu.event(
+    workflow="OrderFulfillment",
+    event_id=lambda req: req.order_id,
+    customer_id=lambda req: req.customer_id,
+)
+def handle(req):
+    data = do_something(req)
+    return process(data)
 ```
 
-The `@botanu_workflow` decorator generates a `run_id` and propagates it via W3C Baggage to all downstream calls.
+`botanu.event(...)` generates the `run_id` and propagates it via [W3C Baggage](https://www.w3.org/TR/baggage/) to every downstream call made inside the scope.
 
-**Downstream services (B, C, D, etc.) need zero code changes** -- they just need the K8s annotation.
+**Downstream services (B, C, D, etc.) need zero code changes** — they just need the K8s annotation to enable OTel auto-instrumentation, which picks up the baggage automatically.
 
 ## Helm Chart
 
@@ -351,7 +352,7 @@ For 2000+ applications:
 2. **Phase 2**: Install OTel Operator
 3. **Phase 3**: Create Instrumentation resource
 4. **Phase 4**: Add annotations via GitOps (batch by team/namespace)
-5. **Phase 5**: Instrument entry points with `@botanu_workflow`
+5. **Phase 5**: Instrument entry points with `botanu.event(...)`
 
 Each phase is independent. Annotations can be rolled out gradually.
 

@@ -8,10 +8,13 @@ Why this MUST be in SDK (not collector):
 - Only the SDK can read baggage and write it to span attributes.
 - The collector only sees spans after they're exported.
 
-All heavy processing should happen in the OTel Collector:
-- PII redaction → ``redactionprocessor``
+Heavy non-content processing happens in the OTel Collector:
 - Cardinality limits → ``attributesprocessor``
 - Vendor detection → ``transformprocessor``
+- Belt-and-suspenders PII regex → ``redactionprocessor``
+
+In-process PII scrubbing of content-capture attributes is handled by
+:mod:`botanu.sdk.pii` at the tracker methods, not by a span processor.
 """
 
 from __future__ import annotations
@@ -29,17 +32,18 @@ logger = logging.getLogger(__name__)
 class RunContextEnricher(SpanProcessor):
     """Enriches ALL spans with run context from baggage.
 
-    This ensures that every span (including auto-instrumented ones)
-    gets ``botanu.run_id``, ``botanu.workflow``, etc. attributes.
+    This ensures that every span (including auto-instrumented ones) gets
+    ``botanu.run_id``, ``botanu.workflow``, ``botanu.event_id``,
+    ``botanu.customer_id``, ``botanu.environment``, ``botanu.tenant_id``,
+    and ``botanu.parent_run_id`` attributes when those baggage keys are
+    present on the active OTel context.
 
-    Without this processor, only the root ``botanu.run`` span would
-    have these attributes.
-
-    In ``lean_mode`` (default), only ``run_id`` and ``workflow`` are
-    propagated to minimise per-span overhead.
+    Without this processor, only the root ``botanu.run`` span would carry
+    these attributes; downstream auto-instrumented spans (LLM, HTTP, DB)
+    would not.
     """
 
-    BAGGAGE_KEYS_FULL: ClassVar[List[str]] = [
+    BAGGAGE_KEYS: ClassVar[List[str]] = [
         "botanu.run_id",
         "botanu.workflow",
         "botanu.event_id",
@@ -49,17 +53,6 @@ class RunContextEnricher(SpanProcessor):
         "botanu.parent_run_id",
     ]
 
-    BAGGAGE_KEYS_LEAN: ClassVar[List[str]] = [
-        "botanu.run_id",
-        "botanu.workflow",
-        "botanu.event_id",
-        "botanu.customer_id",
-    ]
-
-    def __init__(self, lean_mode: bool = True) -> None:
-        self._lean_mode = lean_mode
-        self._baggage_keys = self.BAGGAGE_KEYS_LEAN if lean_mode else self.BAGGAGE_KEYS_FULL
-
     def on_start(
         self,
         span: Span,
@@ -68,7 +61,7 @@ class RunContextEnricher(SpanProcessor):
         """Called when a span starts — enrich with run context from baggage."""
         ctx = parent_context or context.get_current()
 
-        for key in self._baggage_keys:
+        for key in self.BAGGAGE_KEYS:
             value = baggage.get_baggage(key, ctx)
             if value:
                 if not span.attributes or key not in span.attributes:

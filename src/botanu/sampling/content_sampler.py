@@ -36,4 +36,4 @@ def should_capture_content(rate: float, event_id: Optional[str] = None) -> bool:
         return False
     if rate >= 1.0:
         return True
-    return random.random() < rate
+    return random.random() < rate  # noqa: S311
