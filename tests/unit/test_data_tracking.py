@@ -552,3 +552,53 @@ class TestRetrievalContentCapture:
             ) as tracker:
                 result = tracker.set_retrieval_content("doc").set_table("docs")
                 assert result is tracker
+
+
+class TestRetrievalContentPIIScrubbing:
+    """Retrieval content runs through the same scrubber pipeline."""
+
+    def _with_config(self, **cfg_kwargs):
+        from contextlib import contextmanager
+
+        from botanu.sdk import bootstrap
+        from botanu.sdk.config import BotanuConfig
+        from botanu.sdk.pii import _reset_cache_for_tests
+
+        @contextmanager
+        def _cm():
+            prev = bootstrap._current_config
+            cfg_kwargs.setdefault("content_capture_rate", 1.0)
+            bootstrap._current_config = BotanuConfig(**cfg_kwargs)
+            _reset_cache_for_tests()
+            try:
+                yield
+            finally:
+                bootstrap._current_config = prev
+                _reset_cache_for_tests()
+
+        return _cm()
+
+    def test_retrieval_content_scrubbed_by_default(self, memory_exporter):
+        with self._with_config():
+            with track_db_operation(
+                system="postgresql",
+                operation=DBOperation.SELECT,
+                database="kb",
+            ) as tracker:
+                tracker.set_retrieval_content("Snippet about alice@example.com")
+
+        attrs = dict(memory_exporter.get_finished_spans()[0].attributes)
+        assert "alice@example.com" not in attrs["botanu.eval.retrieval_content"]
+
+    def test_opt_out_preserves_retrieval_text(self, memory_exporter):
+        text = "Snippet about alice@example.com"
+        with self._with_config(pii_scrub_enabled=False):
+            with track_db_operation(
+                system="postgresql",
+                operation=DBOperation.SELECT,
+                database="kb",
+            ) as tracker:
+                tracker.set_retrieval_content(text)
+
+        attrs = dict(memory_exporter.get_finished_spans()[0].attributes)
+        assert attrs["botanu.eval.retrieval_content"] == text

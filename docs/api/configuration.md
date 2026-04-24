@@ -11,20 +11,24 @@ from botanu.sdk.config import BotanuConfig
 ### Fields
 
 | Field | Type | Default | Description |
-|-------|------|---------|-------------|
+| --- | --- | --- | --- |
 | `service_name` | `str` | From env / `"unknown_service"` | Service name |
 | `service_version` | `str` | From env | Service version |
 | `service_namespace` | `str` | From env | Service namespace |
 | `deployment_environment` | `str` | From env / `"production"` | Deployment environment |
 | `auto_detect_resources` | `bool` | `True` | Auto-detect cloud resources |
-| `otlp_endpoint` | `str` | From env / `"http://localhost:4318"` | OTLP endpoint |
-| `otlp_headers` | `dict` | `None` | Custom headers for OTLP exporter |
+| `otlp_endpoint` | `str` | From env / auto-configured when `BOTANU_API_KEY` is set / `"http://localhost:4318"` | OTLP endpoint |
+| `otlp_headers` | `dict` | `None` | Custom headers for OTLP exporter — always honored |
+| `content_capture_rate` | `float` | `0.0` | Prompt/response capture rate (0.0–1.0). See [Content Capture](../tracking/content-capture.md). |
+| `pii_scrub_enabled` | `bool` | `True` | In-process PII scrub of captured content |
+| `pii_scrub_use_presidio` | `bool` | `False` | Add Microsoft Presidio NER to the scrub pipeline |
 | `max_export_batch_size` | `int` | `512` | Max spans per batch |
 | `max_queue_size` | `int` | `65536` | Max spans in queue (~64 MB at ~1 KB/span) |
 | `schedule_delay_millis` | `int` | `5000` | Delay between batch exports |
 | `export_timeout_millis` | `int` | `30000` | Timeout for export operations |
-| `propagation_mode` | `str` | `"lean"` | `"lean"` or `"full"` |
 | `auto_instrument_packages` | `list` | See below | Packages to auto-instrument |
+
+`BOTANU_API_KEY` is not a field on the dataclass. When the env var is set, `BotanuConfig` auto-configures `otlp_endpoint` to `https://ingest.botanu.ai` and injects the bearer token into `otlp_headers` — but only for botanu-trusted hosts (any `*.botanu.ai` plus `localhost`).
 
 ### Constructor
 
@@ -119,29 +123,34 @@ print(config.to_dict())
 
 ```yaml
 service:
-  name: string              # Service name
-  version: string           # Service version
-  namespace: string         # Service namespace
-  environment: string       # Deployment environment
+  name: string
+  version: string
+  namespace: string
+  environment: string
 
 resource:
-  auto_detect: boolean      # Auto-detect cloud resources
+  auto_detect: boolean
 
 otlp:
-  endpoint: string          # OTLP endpoint URL
-  headers:                  # Custom headers
+  endpoint: string
+  headers:
     header-name: value
 
 export:
-  batch_size: integer       # Max spans per batch
-  queue_size: integer       # Max spans in queue
-  delay_ms: integer         # Delay between exports
-  export_timeout_ms: integer # Export timeout
+  batch_size: integer
+  queue_size: integer
+  delay_ms: integer
+  export_timeout_ms: integer
 
-propagation:
-  mode: string              # "lean" or "full"
+eval:
+  content_capture_rate: float
+  pii:
+    enabled: boolean
+    use_presidio: boolean
+    replacement: string
+    disable_patterns: [string]
 
-auto_instrument_packages:   # List of packages to instrument
+auto_instrument_packages:
   - package_name
 ```
 
@@ -164,114 +173,27 @@ Syntax:
 
 ---
 
-## enable()
+## `disable()`
 
-Bootstrap function to initialise the SDK.
-
-```python
-from botanu import enable
-
-enable(
-    service_name: Optional[str] = None,
-    otlp_endpoint: Optional[str] = None,
-    environment: Optional[str] = None,
-    auto_instrumentation: bool = True,
-    propagators: Optional[List[str]] = None,
-    log_level: str = "INFO",
-    config: Optional[BotanuConfig] = None,
-    config_file: Optional[str] = None,
-) -> bool
-```
-
-### Parameters
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `service_name` | `str` | From env | Service name |
-| `otlp_endpoint` | `str` | From env | OTLP endpoint URL |
-| `environment` | `str` | From env | Deployment environment |
-| `auto_instrumentation` | `bool` | `True` | Enable auto-instrumentation |
-| `propagators` | `list[str]` | `["tracecontext", "baggage"]` | Propagator list |
-| `log_level` | `str` | `"INFO"` | Logging level |
-| `config` | `BotanuConfig` | `None` | Pre-built configuration (overrides individual params) |
-| `config_file` | `str` | `None` | Path to YAML config file |
-
-### Returns
-
-`True` if successfully initialised, `False` if already initialised.
-
-### Behaviour
-
-1. Creates/merges `BotanuConfig`
-2. Configures `TracerProvider` with `RunContextEnricher`
-3. Sets up OTLP exporter
-4. Enables auto-instrumentation (if requested)
-5. Configures W3C Baggage propagation
-
-### Examples
-
-#### Minimal
+Flush pending spans and shut down the SDK cleanly. Typically called at application shutdown.
 
 ```python
-from botanu import enable
+import botanu
 
-enable(service_name="my-service")
-```
-
-#### With Config Object
-
-```python
-from botanu import enable
-from botanu.sdk.config import BotanuConfig
-
-config = BotanuConfig.from_yaml("config/botanu.yaml")
-enable(config=config)
-```
-
-#### From environment only
-
-```python
-from botanu import enable
-
-# Reads OTEL_SERVICE_NAME, OTEL_EXPORTER_OTLP_ENDPOINT, etc.
-enable()
+botanu.disable()
 ```
 
 ---
 
-## disable()
+## `is_enabled()`
 
-Disable the SDK and clean up resources.
-
-```python
-from botanu import disable
-
-disable() -> None
-```
-
-### Behaviour
-
-1. Flushes pending spans
-2. Shuts down span processors
-3. Disables instrumentation
-
----
-
-## is_enabled()
-
-Check if the SDK is currently enabled.
+Check if the SDK has been initialised.
 
 ```python
-from botanu import is_enabled
+import botanu
 
-is_enabled() -> bool
-```
-
-### Example
-
-```python
-if not is_enabled():
-    enable(service_name="my-service")
+if botanu.is_enabled():
+    ...
 ```
 
 ---
@@ -295,7 +217,6 @@ if not is_enabled():
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `BOTANU_ENVIRONMENT` | Fallback for environment | `"production"` |
-| `BOTANU_PROPAGATION_MODE` | `"lean"` or `"full"` | `"lean"` |
 | `BOTANU_AUTO_DETECT_RESOURCES` | Auto-detect cloud resources | `"true"` |
 | `BOTANU_CONFIG_FILE` | Path to YAML config file | None |
 | `BOTANU_COLLECTOR_ENDPOINT` | Override for OTLP endpoint | None |
@@ -307,8 +228,7 @@ if not is_enabled():
 
 ## RunContext
 
-Model for run metadata. Created automatically by `@botanu_workflow` and
-`run_botanu`.
+Model for run metadata. Created automatically by `botanu.event(...)`.
 
 ```python
 from botanu.models.run_context import RunContext
@@ -363,8 +283,14 @@ def from_baggage(cls, baggage: Dict[str, str]) -> Optional[RunContext]
 Serialise to baggage format.
 
 ```python
-def to_baggage_dict(self, lean_mode: Optional[bool] = None) -> Dict[str, str]
+def to_baggage_dict(self) -> Dict[str, str]
 ```
+
+Always included: `botanu.run_id`, `botanu.workflow`, `botanu.event_id`, `botanu.customer_id`, `botanu.environment`.
+
+Included when set: `botanu.tenant_id`, `botanu.parent_run_id`, `botanu.root_run_id`, `botanu.attempt`, `botanu.retry_of_run_id`, `botanu.deadline`, `botanu.cancelled`.
+
+The `RunContextEnricher` stamps the first seven on downstream spans; the remaining five are for `from_baggage` to reconstruct retry and deadline state across process boundaries.
 
 #### to_span_attributes()
 

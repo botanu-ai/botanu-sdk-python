@@ -22,7 +22,7 @@ Instrumentation packages are lightweight shims that silently no-op when the targ
 Set your API key as an environment variable. The SDK auto-configures the OTLP endpoint to `ingest.botanu.ai` — no other configuration needed.
 
 ```bash
-export BOTANU_API_KEY="btnu_live_..."
+export BOTANU_API_KEY="<your-api-key>"
 ```
 
 That's it. No collector to run, no infrastructure to deploy. Botanu hosts everything.
@@ -56,7 +56,7 @@ FROM python:3.12-slim
 WORKDIR /app
 RUN pip install botanu
 COPY . .
-ENV BOTANU_API_KEY="btnu_live_..."
+ENV BOTANU_API_KEY="<your-api-key>"
 CMD ["python", "app.py"]
 ```
 

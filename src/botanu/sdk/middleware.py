@@ -10,7 +10,6 @@ spans with Botanu-specific context.
 from __future__ import annotations
 
 import uuid
-from typing import Optional
 
 from opentelemetry import baggage as otel_baggage
 from opentelemetry import trace

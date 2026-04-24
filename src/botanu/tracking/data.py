@@ -194,22 +194,25 @@ class DBTracker:
 
         Writes the ``botanu.eval.retrieval_content`` span attribute only if
         the active config's ``content_capture_rate`` > 0.0 allows this call.
-        Truncates to ``max_chars`` (default 4096) before stamping.
+        Pipeline: sampling gate → PII scrub (on by default, see
+        :mod:`botanu.sdk.pii`) → truncate to ``max_chars`` (default 4096) →
+        ``set_attribute``.
 
-        PII scrubbing is handled downstream (collector + evaluator).
         No-op when ``span`` is unset, ``text`` is empty/None, or the rate
         excludes this call.
         """
         if not self.span or not text:
             return self
-        from botanu.sdk.bootstrap import get_config
         from botanu.sampling.content_sampler import should_capture_content
+        from botanu.sdk.bootstrap import get_config
+        from botanu.sdk.pii import apply_scrub
 
         cfg = get_config()
         rate = cfg.content_capture_rate if cfg else 0.0
         if not should_capture_content(rate):
             return self
-        self.span.set_attribute("botanu.eval.retrieval_content", text[:max_chars])
+        scrubbed = apply_scrub(text, cfg) if cfg else text
+        self.span.set_attribute("botanu.eval.retrieval_content", scrubbed[:max_chars])
         return self
 
     def set_error(self, error: Exception) -> DBTracker:

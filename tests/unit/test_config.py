@@ -52,7 +52,6 @@ class TestBotanuConfigDefaults:
 
             assert config.service_name == "unknown_service"
             assert config.deployment_environment == "production"
-            assert config.propagation_mode == "lean"
             assert config.auto_detect_resources is True
 
     def test_env_var_service_name(self):
@@ -83,12 +82,6 @@ class TestBotanuConfigDefaults:
         with mock.patch.dict(os.environ, {"OTEL_SERVICE_NAME": "env-service"}):
             config = BotanuConfig(service_name="explicit-service")
             assert config.service_name == "explicit-service"
-
-    def test_env_var_propagation_mode(self):
-        with mock.patch.dict(os.environ, {"BOTANU_PROPAGATION_MODE": "full"}):
-            config = BotanuConfig()
-            assert config.propagation_mode == "full"
-
 
 class TestBotanuConfigFromYaml:
     """Tests for loading config from YAML."""
@@ -329,11 +322,6 @@ class TestBotanuConfigPrecedence:
             config = BotanuConfig()
             assert config.deployment_environment == "staging"
 
-    def test_propagation_mode_rejects_invalid(self):
-        with mock.patch.dict(os.environ, {"BOTANU_PROPAGATION_MODE": "invalid"}):
-            config = BotanuConfig()
-            assert config.propagation_mode == "lean"
-
     def test_auto_detect_resources_env_false(self):
         with mock.patch.dict(os.environ, {"BOTANU_AUTO_DETECT_RESOURCES": "false"}):
             config = BotanuConfig()
@@ -504,3 +492,76 @@ class TestContentCaptureRate:
         config = BotanuConfig(content_capture_rate=0.1)
         d = config.to_dict()
         assert d["eval"]["content_capture_rate"] == 0.1
+
+
+class TestPIIScrubConfig:
+    """Tests for pii_scrub_* config fields and env-var parsing."""
+
+    def test_default_enabled(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            config = BotanuConfig()
+            assert config.pii_scrub_enabled is True
+            assert config.pii_scrub_use_presidio is False
+            assert config.pii_scrub_replacement == "[REDACTED]"
+
+    def test_env_var_disables(self):
+        with mock.patch.dict(os.environ, {"BOTANU_PII_SCRUB_ENABLED": "false"}):
+            config = BotanuConfig()
+            assert config.pii_scrub_enabled is False
+
+    def test_env_var_enabled_variants(self):
+        for value in ("true", "1", "yes"):
+            with mock.patch.dict(os.environ, {"BOTANU_PII_SCRUB_ENABLED": value}):
+                assert BotanuConfig().pii_scrub_enabled is True
+
+    def test_env_var_unset_keeps_default_on(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            os.environ.pop("BOTANU_PII_SCRUB_ENABLED", None)
+            assert BotanuConfig().pii_scrub_enabled is True
+
+    def test_env_disable_patterns_list(self):
+        with mock.patch.dict(os.environ, {"BOTANU_PII_SCRUB_DISABLE_PATTERNS": "ipv4, ipv6 , email"}):
+            config = BotanuConfig()
+            assert config.pii_scrub_disable_patterns == ["ipv4", "ipv6", "email"]
+
+    def test_env_use_presidio(self):
+        with mock.patch.dict(os.environ, {"BOTANU_PII_SCRUB_USE_PRESIDIO": "true"}):
+            assert BotanuConfig().pii_scrub_use_presidio is True
+
+    def test_env_replacement(self):
+        with mock.patch.dict(os.environ, {"BOTANU_PII_SCRUB_REPLACEMENT": "<X>"}):
+            assert BotanuConfig().pii_scrub_replacement == "<X>"
+
+    def test_yaml_loads_pii_section(self, tmp_path):
+        cfg_path = tmp_path / "botanu.yaml"
+        cfg_path.write_text(
+            "eval:\n"
+            "  content_capture_rate: 0.2\n"
+            "  pii:\n"
+            "    enabled: false\n"
+            "    disable_patterns: [ipv4]\n"
+            "    custom_patterns:\n"
+            "      order: 'ORD-\\d+'\n"
+            "    use_presidio: true\n"
+            "    replacement: '<X>'\n"
+        )
+        config = BotanuConfig.from_yaml(str(cfg_path))
+        assert config.pii_scrub_enabled is False
+        assert config.pii_scrub_disable_patterns == ["ipv4"]
+        assert config.pii_scrub_custom_patterns == {"order": "ORD-\\d+"}
+        assert config.pii_scrub_use_presidio is True
+        assert config.pii_scrub_replacement == "<X>"
+
+    def test_to_dict_exposes_pii_settings(self):
+        config = BotanuConfig(pii_scrub_custom_patterns={"emp": r"EMP-\d+"})
+        d = config.to_dict()
+        assert d["eval"]["pii"]["enabled"] is True
+        assert d["eval"]["pii"]["custom_pattern_count"] == 1
+        # Custom regex body must not leak — only the count is exposed.
+        assert "EMP" not in str(d)
+
+    def test_repr_does_not_leak_custom_patterns(self):
+        config = BotanuConfig(pii_scrub_custom_patterns={"emp": r"EMP-\d+"})
+        text = repr(config)
+        assert "EMP" not in text
+        assert "pii_scrub_enabled=True" in text

@@ -8,7 +8,13 @@ This SDK is built on [OpenTelemetry](https://opentelemetry.io/) for event-level 
 
 ## Getting Started
 
+An **event** is one business transaction — resolving a support ticket, processing an order, generating a report. Each event may involve multiple **runs** (LLM calls, retries, sub-workflows) across multiple services. By correlating every run to a stable `event_id`, Botanu gives you per-event cost attribution and outcome tracking without sampling artefacts.
 
+## Install
+
+```bash
+pip install botanu
+```
 
 An **event** is one business transaction — resolving a support ticket, processing
 an order, generating a report. Each event may involve multiple **runs** (LLM calls,
@@ -17,91 +23,104 @@ stable `event_id`, botanu gives you per-event cost attribution and outcome
 tracking without sampling artifacts.
 
 ```bash
-pip install botanu
+export BOTANU_API_KEY=<your-api-key>
 ```
 
-One install. Includes OTel SDK, OTLP exporter, and auto-instrumentation for
-50+ libraries.
+Wrap your agent:
 
 ```python
-from botanu import enable, botanu_workflow, emit_outcome
+import botanu
 
-enable()  # reads config from environment variables
-
-@botanu_workflow("my-workflow", event_id="evt-001", customer_id="cust-42")
-async def do_work():
-    result = await do_something()
-    emit_outcome("success")
-    return result
+with botanu.event(event_id=ticket.id, customer_id=user.id, workflow="Support"):
+    agent.run(ticket)
 ```
 
-Entry points use `@botanu_workflow`. Every other service only needs `enable()`.
-All configuration is via environment variables — zero hardcoded values in code.
+That single wrap captures every LLM call, HTTP call, and DB call inside and stamps them with `event_id`, `customer_id`, and `workflow`.
 
-See the [Quick Start](./docs/getting-started/quickstart.md) guide for a full walkthrough.
+### Decorator form
+
+```python
+import botanu
+
+@botanu.event(
+    workflow="Support",
+    event_id=lambda ticket: ticket.id,
+    customer_id=lambda ticket: ticket.user_id,
+)
+def handle_ticket(ticket):
+    return agent.run(ticket)
+```
+
+Works for both sync and `async def` functions.
+
+### Multi-phase workflows
+
+```python
+with botanu.event(event_id=ticket.id, customer_id=user.id, workflow="Support"):
+    with botanu.step("retrieval"):
+        docs = vector_db.query(ticket.query)
+    with botanu.step("generation"):
+        response = llm.complete(docs)
+```
+
+See the [Quickstart](./docs/getting-started/quickstart.md) for the full five-minute walkthrough.
 
 ## Documentation
 
-| Topic | Description |
-|-------|-------------|
-| [Installation](./docs/getting-started/installation.md) | Install and configure the SDK |
-| [Quick Start](./docs/getting-started/quickstart.md) | Get up and running in 5 minutes |
-| [Configuration](./docs/getting-started/configuration.md) | Environment variables and options |
-| [Core Concepts](./docs/concepts/) | Events, runs, context propagation, architecture |
-| [LLM Tracking](./docs/tracking/llm-tracking.md) | Track model calls and token usage |
-| [Data Tracking](./docs/tracking/data-tracking.md) | Database, storage, and messaging |
-| [Outcomes](./docs/tracking/outcomes.md) | Record business outcomes for ROI |
-| [Auto-Instrumentation](./docs/integration/auto-instrumentation.md) | Supported libraries and frameworks |
+| Topic | |
+| --- | --- |
+| [Installation](./docs/getting-started/installation.md) | Install and configure |
+| [Quickstart](./docs/getting-started/quickstart.md) | Zero-to-first-trace in five minutes |
+| [Configuration](./docs/getting-started/configuration.md) | Env vars, YAML, trusted-host auth |
+| [Run Context](./docs/concepts/run-context.md) | Events, runs, retries, baggage |
+| [Context Propagation](./docs/concepts/context-propagation.md) | Cross-service and queue propagation |
+| [Architecture](./docs/concepts/architecture.md) | SDK + collector split |
+| [LLM Tracking](./docs/tracking/llm-tracking.md) | Manual LLM instrumentation (usually not needed) |
+| [Data Tracking](./docs/tracking/data-tracking.md) | DB, storage, messaging (usually not needed) |
+| [Content Capture](./docs/tracking/content-capture.md) | Prompt/response capture for eval, with PII scrubbing |
+| [Outcomes](./docs/tracking/outcomes.md) | Diagnostic annotations and server-side resolution |
+| [Auto-Instrumentation](./docs/integration/auto-instrumentation.md) | Supported libraries |
 | [Kubernetes](./docs/integration/kubernetes.md) | Zero-code instrumentation at scale |
-| [API Reference](./docs/api/) | Decorators, tracking API, configuration |
-| [Best Practices](./docs/patterns/best-practices.md) | Recommended patterns |
+| [Existing OTel / Datadog](./docs/integration/existing-otel.md) | Brownfield coexistence |
+| [`event` / `step` API](./docs/api/event.md) | Primary API reference |
+| [Best Practices](./docs/patterns/best-practices.md) | Patterns that work |
+| [Anti-Patterns](./docs/patterns/anti-patterns.md) | Patterns that break cost attribution |
 
 ## Requirements
 
-- Python 3.9+
-- OpenTelemetry Collector (recommended for production)
+- Python 3.9 or newer
+- An OpenTelemetry Collector (Botanu Cloud runs one for you; self-hosted is supported too)
 
 ## Contributing
 
-We welcome contributions from the community. Please read our
-[Contributing Guide](./CONTRIBUTING.md) before submitting a pull request.
+Contributions are welcome. Read the [Contributing Guide](./CONTRIBUTING.md) before opening a pull request.
 
-This project requires [DCO sign-off](https://developercertificate.org/) on all
-commits:
+All commits require [DCO sign-off](https://developercertificate.org/):
 
 ```bash
 git commit -s -m "Your commit message"
 ```
 
-Looking for a place to start? Check the
-[good first issues](https://github.com/botanu-ai/botanu-sdk-python/labels/good%20first%20issue).
+Looking for a place to start? See the [good first issues](https://github.com/botanu-ai/botanu-sdk-python/labels/good%20first%20issue).
 
 ## Community
 
 - [GitHub Discussions](https://github.com/botanu-ai/botanu-sdk-python/discussions) — questions, ideas, show & tell
-- [GitHub Issues](https://github.com/botanu-ai/botanu-sdk-python/issues) — bug reports and feature requests
+- [GitHub Issues](https://github.com/botanu-ai/botanu-sdk-python/issues) — bugs and feature requests
 
 ## Governance
 
-See [GOVERNANCE.md](./GOVERNANCE.md) for details on roles, decision-making,
-and the contributor ladder.
-
-Current maintainers are listed in [MAINTAINERS.md](./MAINTAINERS.md).
+See [GOVERNANCE.md](./GOVERNANCE.md) for roles, decision-making, and the contributor ladder. Current maintainers are in [MAINTAINERS.md](./MAINTAINERS.md).
 
 ## Security
 
-To report a security vulnerability, please use
-[GitHub Security Advisories](https://github.com/botanu-ai/botanu-sdk-python/security/advisories/new)
-or see [SECURITY.md](./SECURITY.md) for full details. **Do not file a public issue.**
+Report security vulnerabilities via [GitHub Security Advisories](https://github.com/botanu-ai/botanu-sdk-python/security/advisories/new) or see [SECURITY.md](./SECURITY.md). **Do not file a public issue.**
 
 
 ## Code of Conduct
 
-This project follows the
-[LF Projects Code of Conduct](https://lfprojects.org/policies/code-of-conduct/).
-See [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md).
+This project follows the [LF Projects Code of Conduct](https://lfprojects.org/policies/code-of-conduct/). See [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md).
 
 ## License
 
 [Apache License 2.0](./LICENSE)
-

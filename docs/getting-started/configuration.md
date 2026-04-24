@@ -1,52 +1,56 @@
 # Configuration
 
-Botanu SDK can be configured through code, environment variables, or YAML files.
+One environment variable is enough for most installations. Code and YAML are available for anything more complex.
 
-## Configuration Precedence
-
-1. **Code arguments** (explicit values passed to `BotanuConfig`)
-2. **Environment variables** (`BOTANU_*`, `OTEL_*`)
-3. **YAML config file** (`botanu.yaml` or specified path)
-4. **Built-in defaults**
-
-## Quick Configuration
-
-### Code-Based
-
-```python
-from botanu import enable
-
-enable(
-    service_name="my-service",
-    otlp_endpoint="http://collector:4318/v1/traces",
-)
-```
-
-### Environment Variables
+## Minimal
 
 ```bash
-export OTEL_SERVICE_NAME=my-service
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:4318
-export BOTANU_ENVIRONMENT=production
+export BOTANU_API_KEY=<your-api-key>
+python your_app.py
 ```
 
-### YAML File
+When `BOTANU_API_KEY` is set, the SDK auto-configures the OTLP endpoint to `https://ingest.botanu.ai` and sends the key as a bearer token on every export. No other variables are required.
+
+## The API key is only sent to botanu-trusted endpoints
+
+If you override the OTLP endpoint to anything outside the botanu-trusted list, the SDK will not attach your API key. This prevents a misconfigured `OTEL_EXPORTER_OTLP_ENDPOINT` from leaking tenant credentials to a third-party backend.
+
+Trusted hosts:
+
+- Any host ending in `.botanu.ai`
+- `localhost`, `127.0.0.1`, `::1`, `0.0.0.0`
+
+For any other endpoint, the exporter ships without a bearer header. If your self-hosted collector needs auth, set `OTEL_EXPORTER_OTLP_HEADERS` or pass `otlp_headers=` to `BotanuConfig` explicitly — those headers are always honored.
+
+## Configuration precedence
+
+1. Environment variables (`BOTANU_*`, `OTEL_*`)
+2. YAML config file (`botanu.yaml` or a path you pass)
+3. Built-in defaults
+
+## Environment variables
+
+```bash
+export BOTANU_API_KEY=<your-api-key>
+export OTEL_SERVICE_NAME=my-service
+export BOTANU_ENVIRONMENT=production
+export BOTANU_CONTENT_CAPTURE_RATE=0.10
+```
+
+## YAML
 
 ```yaml
-# botanu.yaml
 service:
   name: my-service
   version: 1.0.0
   environment: production
 
 otlp:
-  endpoint: http://collector:4318/v1/traces
+  endpoint: https://ingest.botanu.ai
 
-propagation:
-  mode: lean
+eval:
+  content_capture_rate: 0.10
 ```
-
-Load with:
 
 ```python
 from botanu.sdk.config import BotanuConfig
@@ -54,214 +58,110 @@ from botanu.sdk.config import BotanuConfig
 config = BotanuConfig.from_yaml("botanu.yaml")
 ```
 
-## Full Configuration Reference
-
-### BotanuConfig Fields
+## `BotanuConfig` fields
 
 ```python
 from dataclasses import dataclass
 
 @dataclass
 class BotanuConfig:
-    # Service identification
-    service_name: str = None          # OTEL_SERVICE_NAME
-    service_version: str = None       # OTEL_SERVICE_VERSION
-    service_namespace: str = None     # OTEL_SERVICE_NAMESPACE
-    deployment_environment: str = None # OTEL_DEPLOYMENT_ENVIRONMENT
+    service_name: str = None
+    service_version: str = None
+    service_namespace: str = None
+    deployment_environment: str = None
 
-    # Resource detection
-    auto_detect_resources: bool = True # BOTANU_AUTO_DETECT_RESOURCES
+    auto_detect_resources: bool = True
 
-    # OTLP exporter
-    otlp_endpoint: str = None         # OTEL_EXPORTER_OTLP_ENDPOINT
-    otlp_headers: dict = None         # Custom headers for auth
+    otlp_endpoint: str = None
+    otlp_headers: dict = None
 
-    # Span export
     max_export_batch_size: int = 512
     max_queue_size: int = 65536
     schedule_delay_millis: int = 5000
     export_timeout_millis: int = 30000
 
-    # Propagation mode
-    propagation_mode: str = "lean"    # BOTANU_PROPAGATION_MODE
-
-    # Auto-instrumentation
-    auto_instrument_packages: list = [...]
+    content_capture_rate: float = 0.0
 ```
 
-## Environment Variables
+`BOTANU_API_KEY` is not a field on the dataclass — when the env var is set, `BotanuConfig` auto-configures `otlp_endpoint` + `otlp_headers` for the botanu-trusted endpoint.
 
-### OpenTelemetry Standard Variables
+## Environment variable reference
+
+### OpenTelemetry standard
 
 | Variable | Description | Default |
-|----------|-------------|---------|
+| --- | --- | --- |
 | `OTEL_SERVICE_NAME` | Service name | `unknown_service` |
 | `OTEL_SERVICE_VERSION` | Service version | None |
 | `OTEL_SERVICE_NAMESPACE` | Service namespace | None |
 | `OTEL_DEPLOYMENT_ENVIRONMENT` | Environment name | `production` |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP collector base URL | `http://localhost:4318` |
-| `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` | OTLP traces endpoint (full URL) | None |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP collector base URL | Auto-set to `https://ingest.botanu.ai` when `BOTANU_API_KEY` is set |
+| `OTEL_EXPORTER_OTLP_HEADERS` | Extra OTLP headers | None |
 
-### Botanu-Specific Variables
+### botanu-specific
 
 | Variable | Description | Default |
-|----------|-------------|---------|
+| --- | --- | --- |
+| `BOTANU_API_KEY` | API key for Botanu Cloud. Auto-configures endpoint and bearer token on trusted hosts. | None |
 | `BOTANU_ENVIRONMENT` | Fallback for environment | `production` |
-| `BOTANU_PROPAGATION_MODE` | `lean` or `full` | `lean` |
+| `BOTANU_CONTENT_CAPTURE_RATE` | Content-capture sampling rate, `0.0`–`1.0`. See [Content Capture](../tracking/content-capture.md). | `0.0` |
 | `BOTANU_AUTO_DETECT_RESOURCES` | Auto-detect cloud resources | `true` |
 | `BOTANU_CONFIG_FILE` | Path to YAML config | None |
+| `BOTANU_COLLECTOR_ENDPOINT` | OTLP endpoint override (same behavior as `OTEL_EXPORTER_OTLP_ENDPOINT`) | None |
 
-## YAML Configuration
+## Content capture
 
-### Full Example
-
-```yaml
-# botanu.yaml - Full configuration example
-service:
-  name: ${OTEL_SERVICE_NAME:-my-service}
-  version: ${APP_VERSION:-1.0.0}
-  namespace: production
-  environment: ${ENVIRONMENT:-production}
-
-resource:
-  auto_detect: true
-
-otlp:
-  endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:-http://localhost:4318}/v1/traces
-  headers:
-    Authorization: Bearer ${OTLP_AUTH_TOKEN}
-
-export:
-  batch_size: 512
-  queue_size: 2048
-  delay_ms: 5000
-
-propagation:
-  mode: lean
-
-auto_instrument_packages:
-  - requests
-  - httpx
-  - fastapi
-  - sqlalchemy
-  - openai_v2
-```
-
-### Environment Variable Interpolation
-
-The YAML loader supports two interpolation patterns:
-
-```yaml
-# Simple interpolation
-endpoint: ${COLLECTOR_URL}
-
-# With default value
-endpoint: ${COLLECTOR_URL:-http://localhost:4318}
-```
-
-### Loading Configuration
-
-```python
-from botanu.sdk.config import BotanuConfig
-
-# Explicit path
-config = BotanuConfig.from_yaml("config/botanu.yaml")
-
-# Auto-discover (searches botanu.yaml, config/botanu.yaml)
-config = BotanuConfig.from_file_or_env()
-
-# Environment only
-config = BotanuConfig()
-```
-
-## Propagation Modes
-
-### Lean Mode (Default)
-
-Propagates only essential fields to minimize header size:
-
-- `botanu.run_id`
-- `botanu.workflow`
-- `botanu.event_id`
-- `botanu.customer_id`
-
-Best for high-traffic systems where header size matters.
-
-### Full Mode
-
-Propagates all context fields:
-
-- `botanu.run_id`
-- `botanu.workflow`
-- `botanu.event_id`
-- `botanu.customer_id`
-- `botanu.environment`
-- `botanu.tenant_id`
-- `botanu.parent_run_id`
-
-Enable with:
+Prompt and response capture for the evaluator is disabled by default. Turn it on with:
 
 ```bash
-export BOTANU_PROPAGATION_MODE=full
+export BOTANU_CONTENT_CAPTURE_RATE=0.10
 ```
 
-## Auto-Instrumentation
+The SDK scrubs PII in-process before writing the captured content. See [Content Capture](../tracking/content-capture.md) for the scrub pipeline, custom patterns, and opt-out flags.
 
-### Default Packages
+## Zero-code initialization
 
-By default, Botanu enables instrumentation for:
+If you can't edit the entry point (third-party process runner, gunicorn preload), import `botanu.register` at process start:
+
+```bash
+python -c "import botanu.register" -m your_app
+```
+
+## Auto-instrumentation
+
+### Default packages
 
 ```python
 [
-    # HTTP clients
     "requests", "httpx", "urllib3", "aiohttp_client",
-    # Web frameworks
     "fastapi", "flask", "django", "starlette",
-    # Databases
     "sqlalchemy", "psycopg2", "asyncpg", "pymongo", "redis",
-    # Messaging
     "celery", "kafka_python",
-    # gRPC
     "grpc",
-    # GenAI
     "openai_v2", "anthropic", "vertexai", "google_genai", "langchain",
-    # Runtime
     "logging",
 ]
 ```
 
-### Customizing Packages
+### Customizing
 
-Override the default list via `BotanuConfig`:
+Set `BOTANU_AUTO_INSTRUMENT_PACKAGES` (comma-separated) or put the list in `botanu.yaml`:
 
-```python
-from botanu import enable
-from botanu.sdk.config import BotanuConfig
-
-config = BotanuConfig(auto_instrument_packages=["requests", "fastapi", "openai_v2"])
-enable(config=config)
+```yaml
+auto_instrument_packages:
+  - requests
+  - fastapi
+  - openai_v2
 ```
 
-### Disabling Auto-Instrumentation
+### Disabling
 
-```python
-enable(auto_instrumentation=False)
-```
+Set `BOTANU_AUTO_INSTRUMENTATION=false` to skip auto-instrumentation entirely. Only do this if you've manually instrumented every library you care about.
 
-## Exporting Configuration
+## See also
 
-```python
-config = BotanuConfig(
-    service_name="my-service",
-    deployment_environment="production",
-)
-
-# Export as dictionary
-print(config.to_dict())
-```
-
-## See Also
-
-- [Architecture](../concepts/architecture.md) - SDK design principles
-- [Collector Configuration](../integration/collector.md) - Collector setup
-- [Existing OTel Setup](../integration/existing-otel.md) - Integration with existing OTel
+- [Quickstart](quickstart.md)
+- [Architecture](../concepts/architecture.md)
+- [Collector](../integration/collector.md)
+- [Coexisting with existing OTel / Datadog](../integration/existing-otel.md)
+- [Content Capture](../tracking/content-capture.md)

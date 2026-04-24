@@ -223,9 +223,12 @@ with track_db_operation(
 #### Example
 
 ```python
-with track_db_operation(system="postgresql", operation="SELECT") as db:
-    result = await cursor.execute(query)
-    db.set_result(rows_returned=len(result))
+import asyncpg
+
+async with asyncpg.connect(dsn) as conn:
+    with track_db_operation(system="postgresql", operation="SELECT") as db:
+        rows = await conn.fetch("SELECT id FROM orders WHERE user_id = $1", user_id)
+        db.set_result(rows_returned=len(rows))
 ```
 
 ---
@@ -390,13 +393,12 @@ def add_metadata(**kwargs: Any) -> MessagingTracker
 
 ### emit_outcome()
 
-Emit a business outcome for the current span.
+Stamp diagnostic fields on the current span. Authoritative event outcome is resolved server-side — see [Outcomes](../tracking/outcomes.md).
 
 ```python
-from botanu import emit_outcome
+import botanu
 
-emit_outcome(
-    status: str,
+botanu.emit_outcome(
     *,
     value_type: Optional[str] = None,
     value_amount: Optional[float] = None,
@@ -410,20 +412,19 @@ emit_outcome(
 #### Parameters
 
 | Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `status` | `str` | Required | Outcome status: `"success"`, `"partial"`, `"failed"`, `"timeout"`, `"canceled"`, `"abandoned"` |
-| `value_type` | `str` | `None` | Type of business value achieved |
+| --- | --- | --- | --- |
+| `value_type` | `str` | `None` | Type of business value (e.g. `"tickets_resolved"`) |
 | `value_amount` | `float` | `None` | Quantified value amount |
-| `confidence` | `float` | `None` | Confidence score (0.0-1.0) |
-| `reason` | `str` | `None` | Reason for the outcome |
+| `confidence` | `float` | `None` | Confidence score, `0.0`–`1.0` |
+| `reason` | `str` | `None` | Diagnostic reason |
 | `error_type` | `str` | `None` | Error classification (e.g. `"TimeoutError"`) |
 | `metadata` | `dict[str, str]` | `None` | Additional key-value metadata |
 
 #### Example
 
 ```python
-emit_outcome("success", value_type="items_processed", value_amount=1)
-emit_outcome("failed", error_type="TimeoutError", reason="LLM took >30s")
+botanu.emit_outcome(value_type="tickets_resolved", value_amount=1)
+botanu.emit_outcome(error_type="TimeoutError", reason="LLM took >30s")
 ```
 
 ---

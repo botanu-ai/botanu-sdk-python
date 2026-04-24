@@ -9,28 +9,14 @@ These functions add Botanu-specific attributes to the current span.
 from __future__ import annotations
 
 import logging
-import warnings
 from typing import Optional
 
 from opentelemetry import trace
 
 logger = logging.getLogger(__name__)
 
-VALID_OUTCOME_STATUSES = {
-    "success", "partial", "failed", "timeout", "canceled", "abandoned",
-}
-
-_DEPRECATION_MSG = (
-    "emit_outcome(status=...) no longer stamps `botanu.outcome.status` on the "
-    "span — customer-reported outcome has been removed (it was trivially "
-    "fakeable). Event outcome is now derived from eval verdict rollup / HITL / "
-    "SoR. You can remove this call, or keep it for the diagnostic fields "
-    "(reason, error_type, value_*, confidence, metadata) which still stamp."
-)
-
 
 def emit_outcome(
-    status: str,
     *,
     value_type: Optional[str] = None,
     value_amount: Optional[float] = None,
@@ -39,63 +25,37 @@ def emit_outcome(
     error_type: Optional[str] = None,
     metadata: Optional[dict[str, str]] = None,
 ) -> None:
-    """Emit diagnostic outcome fields on the current span. (DEPRECATED for status.)
+    """Emit diagnostic outcome fields on the current span.
 
-    The ``status`` argument no longer stamps ``botanu.outcome.status`` —
-    customer-reported outcome was removed on 2026-04-16 (trivially fakeable).
-    Event outcome is now derived from eval verdict rollup / HITL / SoR.
-
-    All other fields (``value_type``, ``value_amount``, ``confidence``,
-    ``reason``, ``error_type``, ``metadata``) still stamp as diagnostic
-    attributes — useful for debugging and dashboards, not for authoritative
-    outcome determination.
+    These are **diagnostic only** — the authoritative event outcome is
+    resolved server-side from SoR connectors / HITL reviews / eval verdict
+    rollup. Use these fields to enrich dashboards with business value
+    signals (tickets resolved, dollars saved, etc.) and error diagnostics.
 
     Args:
-        status: Accepted for backward compatibility. A ``DeprecationWarning``
-            is emitted. Must still be one of the valid statuses for validation.
         value_type: Type of business value (e.g., ``"tickets_resolved"``).
         value_amount: Quantified value amount.
         confidence: Confidence score (0.0–1.0).
         reason: Optional diagnostic reason.
         error_type: Error classification (e.g., ``"ValidationError"``).
         metadata: Additional diagnostic key-value metadata.
-
-    Raises:
-        ValueError: If *status* is not a recognised outcome status.
     """
-    if status not in VALID_OUTCOME_STATUSES:
-        raise ValueError(
-            f"Invalid outcome status '{status}'. "
-            f"Must be one of: {', '.join(sorted(VALID_OUTCOME_STATUSES))}"
-        )
-
-    warnings.warn(_DEPRECATION_MSG, DeprecationWarning, stacklevel=2)
-
     span = trace.get_current_span()
-
-    # `botanu.outcome.status` is NOT emitted — see deprecation notice.
 
     if value_type:
         span.set_attribute("botanu.outcome.value_type", value_type)
-
     if value_amount is not None:
         span.set_attribute("botanu.outcome.value_amount", value_amount)
-
     if confidence is not None:
         span.set_attribute("botanu.outcome.confidence", confidence)
-
     if reason:
         span.set_attribute("botanu.outcome.reason", reason)
-
     if error_type:
         span.set_attribute("botanu.outcome.error_type", error_type)
-
     if metadata:
         for key, value in metadata.items():
             span.set_attribute(f"botanu.outcome.metadata.{key}", value)
 
-    # Keep the span event for diagnostic visibility (event, not authoritative),
-    # minus the `status` attribute to stay consistent with the removal.
     event_attrs: dict[str, object] = {}
     if value_type:
         event_attrs["value_type"] = value_type
@@ -103,13 +63,7 @@ def emit_outcome(
         event_attrs["value_amount"] = value_amount
     if error_type:
         event_attrs["error_type"] = error_type
-
     span.add_event("botanu.outcome_emitted", event_attrs)
-
-    # OTel log emission for collector flush trigger has been removed:
-    # the collector's outcome-log flush trigger is being retired as part of
-    # the customer-push outcome deprecation. Events flush via idle timeout
-    # and max-lifetime triggers instead.
 
 
 def set_business_context(
@@ -178,9 +132,9 @@ _SUPPORTED_SOR_PREFIXES = frozenset({
 def set_correlation(**correlations: Optional[str]) -> None:
     """Stamp one or more `botanu.correlation.*` span attributes.
 
-    Called inside a ``@botanu_workflow`` to link the current event to one or
-    more external SoR records. The sor-connector uses these attributes to
-    correlate inbound webhooks (ticket reopen, refund, etc.) back to this
+    Called inside a :func:`botanu.event` scope to link the current event to
+    one or more external SoR records. The sor-connector uses these attributes
+    to correlate inbound webhooks (ticket reopen, refund, etc.) back to this
     event via Tier-1 correlation.
 
     Each keyword becomes a span attribute. A ``None`` or empty-string value
@@ -192,8 +146,7 @@ def set_correlation(**correlations: Optional[str]) -> None:
 
     Example::
 
-        @botanu_workflow("Support", event_id="evt-42", customer_id="acme")
-        def handle(ticket):
+        with botanu.event(event_id="evt-42", customer_id="acme", workflow="Support"):
             set_correlation(zendesk_ticket_id=ticket.id)
             ...
     """

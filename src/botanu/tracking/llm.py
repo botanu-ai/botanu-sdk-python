@@ -326,43 +326,48 @@ class LLMTracker:
         Writes the ``botanu.eval.input_content`` span attribute only if the
         active :class:`~botanu.sdk.config.BotanuConfig` has a
         ``content_capture_rate`` > 0.0 that allows this call (simple
-        ``random.random() < rate`` gate). Truncates to ``max_chars``
-        (default 4096) before stamping.
+        ``random.random() < rate`` gate).
 
-        PII scrubbing is handled downstream by the collector (regex pass)
-        and the evaluator (Presidio NER), not here.
+        Pipeline: sampling gate → PII scrub (on by default, regex + optional
+        Presidio — see :mod:`botanu.sdk.pii`) → truncate to ``max_chars``
+        (default 4096) → ``set_attribute``.
 
         No-op when ``span`` is unset, ``text`` is empty/None, or the config
         rate excludes this call.
         """
         if not self.span or not text:
             return self
-        from botanu.sdk.bootstrap import get_config
         from botanu.sampling.content_sampler import should_capture_content
+        from botanu.sdk.bootstrap import get_config
+        from botanu.sdk.pii import apply_scrub
 
         cfg = get_config()
         rate = cfg.content_capture_rate if cfg else 0.0
         if not should_capture_content(rate):
             return self
-        self.span.set_attribute("botanu.eval.input_content", text[:max_chars])
+        scrubbed = apply_scrub(text, cfg) if cfg else text
+        self.span.set_attribute("botanu.eval.input_content", scrubbed[:max_chars])
         return self
 
     def set_output_content(self, text: str, max_chars: int = 4096) -> LLMTracker:
         """Capture the response/output text for eval.
 
-        See :meth:`set_input_content` for sampling and truncation semantics.
-        Writes the ``botanu.eval.output_content`` span attribute.
+        See :meth:`set_input_content` for sampling, PII scrubbing, and
+        truncation semantics. Writes the ``botanu.eval.output_content``
+        span attribute.
         """
         if not self.span or not text:
             return self
-        from botanu.sdk.bootstrap import get_config
         from botanu.sampling.content_sampler import should_capture_content
+        from botanu.sdk.bootstrap import get_config
+        from botanu.sdk.pii import apply_scrub
 
         cfg = get_config()
         rate = cfg.content_capture_rate if cfg else 0.0
         if not should_capture_content(rate):
             return self
-        self.span.set_attribute("botanu.eval.output_content", text[:max_chars])
+        scrubbed = apply_scrub(text, cfg) if cfg else text
+        self.span.set_attribute("botanu.eval.output_content", scrubbed[:max_chars])
         return self
 
     def set_request_params(

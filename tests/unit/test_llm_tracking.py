@@ -634,3 +634,64 @@ class TestContentCapture:
             with track_llm_call(model="gpt-4", vendor="openai") as tracker:
                 result = tracker.set_input_content("hi").set_output_content("hello")
                 assert result is tracker
+
+
+class TestContentCapturePIIScrubbing:
+    """PII scrubbing runs between the sampling gate and set_attribute."""
+
+    def _with_config(self, **cfg_kwargs):
+        from contextlib import contextmanager
+
+        from botanu.sdk import bootstrap
+        from botanu.sdk.config import BotanuConfig
+        from botanu.sdk.pii import _reset_cache_for_tests
+
+        @contextmanager
+        def _cm():
+            prev = bootstrap._current_config
+            cfg_kwargs.setdefault("content_capture_rate", 1.0)
+            bootstrap._current_config = BotanuConfig(**cfg_kwargs)
+            _reset_cache_for_tests()
+            try:
+                yield
+            finally:
+                bootstrap._current_config = prev
+                _reset_cache_for_tests()
+
+        return _cm()
+
+    def test_input_content_scrubbed_by_default(self, memory_exporter):
+        with self._with_config():
+            with track_llm_call(model="gpt-4", vendor="openai") as tracker:
+                tracker.set_input_content("email me at alice@example.com thanks")
+
+        attrs = dict(memory_exporter.get_finished_spans()[0].attributes)
+        captured = attrs["botanu.eval.input_content"]
+        assert "alice@example.com" not in captured
+        assert "[REDACTED]" in captured
+
+    def test_output_content_scrubbed_by_default(self, memory_exporter):
+        with self._with_config():
+            with track_llm_call(model="gpt-4", vendor="openai") as tracker:
+                tracker.set_output_content("your SSN 123-45-6789 is on file")
+
+        attrs = dict(memory_exporter.get_finished_spans()[0].attributes)
+        assert "123-45-6789" not in attrs["botanu.eval.output_content"]
+
+    def test_opt_out_preserves_text(self, memory_exporter):
+        with self._with_config(pii_scrub_enabled=False):
+            with track_llm_call(model="gpt-4", vendor="openai") as tracker:
+                tracker.set_input_content("email alice@example.com")
+
+        attrs = dict(memory_exporter.get_finished_spans()[0].attributes)
+        assert attrs["botanu.eval.input_content"] == "email alice@example.com"
+
+    def test_scrub_happens_before_truncation(self, memory_exporter):
+        """Scrub runs on full text so a long prefix doesn't bury PII past max_chars."""
+        prefix = "x" * 4000
+        with self._with_config():
+            with track_llm_call(model="gpt-4", vendor="openai") as tracker:
+                tracker.set_input_content(prefix + " mail alice@example.com tail")
+
+        attrs = dict(memory_exporter.get_finished_spans()[0].attributes)
+        assert "alice@example.com" not in attrs["botanu.eval.input_content"]

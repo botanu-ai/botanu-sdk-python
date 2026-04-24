@@ -3,11 +3,13 @@
 
 """Configuration for Botanu SDK.
 
-The SDK is intentionally minimal on the hot path. Heavy processing happens in
-the OpenTelemetry Collector, not in the application:
+The SDK is intentionally minimal on the hot path. Heavy non-content
+processing happens in the OpenTelemetry Collector:
 
-- **SDK responsibility**: Generate run_id, propagate minimal context (run_id, workflow)
-- **Collector responsibility**: PII redaction, vendor detection, attribute enrichment
+- **SDK responsibility**: generate run_id, propagate context, in-process PII
+  scrub on captured content (see :mod:`botanu.sdk.pii`)
+- **Collector responsibility**: vendor detection, attribute enrichment, and
+  belt-and-suspenders PII regex on everything else
 
 Configuration precedence (highest to lowest):
 1. Code arguments (explicit values passed to BotanuConfig)
@@ -30,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 
 _BOTANU_HOST_SUFFIXES = (".botanu.ai",)
-_BOTANU_DEV_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "0.0.0.0"})
+_BOTANU_DEV_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "0.0.0.0"})  # noqa: S104
 _SENSITIVE_HEADER_NAMES = frozenset({"authorization", "x-api-key", "botanu-api-key"})
 
 
@@ -90,8 +92,9 @@ def _redact_headers(headers: Optional[Dict[str, str]]) -> Optional[Dict[str, str
 class BotanuConfig:
     """Configuration for Botanu SDK and OpenTelemetry.
 
-    The SDK is a thin wrapper on OpenTelemetry.  PII redaction, cardinality
-    limits, and vendor enrichment are handled by the OTel Collector — not here.
+    The SDK is a thin wrapper on OpenTelemetry. In-process PII scrubbing
+    runs on captured content via :mod:`botanu.sdk.pii`; cardinality limits
+    and vendor enrichment are handled by the OTel Collector.
 
     Typically configured via environment variables (no hardcoded values)::
 
@@ -123,15 +126,24 @@ class BotanuConfig:
     schedule_delay_millis: int = 5000
     export_timeout_millis: int = 30000
 
-    # Propagation mode: "lean" (run_id + workflow only) or "full" (all context)
-    propagation_mode: str = "lean"
-
     # Content capture for eval — 0.0 disables entirely (default, privacy-safe).
-    # Set to 1.0 for sandbox/shadow, 0.10–0.20 for production. Customers must also
+    # Set to 1.0 for sandbox/shadow, 0.10-0.20 for production. Customers must also
     # call set_input_content() / set_output_content() on their trackers; this rate
-    # gates whether those calls actually write to span attributes. PII scrubbing
-    # happens downstream (collector regex + evaluator Presidio NER), not here.
+    # gates whether those calls actually write to span attributes. In-process PII
+    # scrubbing runs on the captured text before it hits the span (see
+    # pii_scrub_* fields below); collector regex + evaluator Presidio NER
+    # remain belt-and-suspenders.
     content_capture_rate: float = 0.0
+
+    # In-process PII scrubbing — runs on text passed to set_input_content /
+    # set_output_content / set_retrieval_content before the span attribute is
+    # written. Default ON: safer for customers who enable content_capture_rate
+    # without reading the docs.
+    pii_scrub_enabled: bool = True
+    pii_scrub_disable_patterns: Optional[List[str]] = None
+    pii_scrub_custom_patterns: Optional[Dict[str, str]] = None
+    pii_scrub_use_presidio: bool = False
+    pii_scrub_replacement: str = "[REDACTED]"
 
     # Resource-cost inference — default ON. When True, enable() attaches the
     # ResourceEnricher SpanProcessor which reads OTel semconv attributes
@@ -257,10 +269,6 @@ class BotanuConfig:
                     urlparse(self.otlp_endpoint).hostname or "unknown",
                 )
 
-        env_propagation_mode = os.getenv("BOTANU_PROPAGATION_MODE")
-        if env_propagation_mode and env_propagation_mode in ("lean", "full"):
-            self.propagation_mode = env_propagation_mode
-
         # Export tuning via env vars
         env_queue_size = os.getenv("BOTANU_MAX_QUEUE_SIZE")
         if env_queue_size:
@@ -289,6 +297,24 @@ class BotanuConfig:
                 self.content_capture_rate = max(0.0, min(1.0, float(env_content_rate)))
             except ValueError:
                 pass
+
+        env_pii_enabled = os.getenv("BOTANU_PII_SCRUB_ENABLED")
+        if env_pii_enabled is not None:
+            self.pii_scrub_enabled = env_pii_enabled.lower() in ("true", "1", "yes")
+
+        env_pii_disable = os.getenv("BOTANU_PII_SCRUB_DISABLE_PATTERNS")
+        if env_pii_disable is not None:
+            self.pii_scrub_disable_patterns = [
+                name.strip() for name in env_pii_disable.split(",") if name.strip()
+            ]
+
+        env_pii_presidio = os.getenv("BOTANU_PII_SCRUB_USE_PRESIDIO")
+        if env_pii_presidio is not None:
+            self.pii_scrub_use_presidio = env_pii_presidio.lower() in ("true", "1", "yes")
+
+        env_pii_replacement = os.getenv("BOTANU_PII_SCRUB_REPLACEMENT")
+        if env_pii_replacement is not None:
+            self.pii_scrub_replacement = env_pii_replacement
 
     # ------------------------------------------------------------------
     # YAML loading
@@ -381,9 +407,9 @@ class BotanuConfig:
         service = data.get("service", {})
         otlp = data.get("otlp", {})
         export = data.get("export", {})
-        propagation = data.get("propagation", {})
         resource = data.get("resource", {})
         eval_cfg = data.get("eval", {})
+        pii_cfg = eval_cfg.get("pii", {}) if isinstance(eval_cfg, dict) else {}
         auto_packages = data.get("auto_instrument_packages")
 
         return cls(
@@ -398,8 +424,12 @@ class BotanuConfig:
             max_queue_size=export.get("queue_size", 65536),
             schedule_delay_millis=export.get("delay_ms", 5000),
             export_timeout_millis=export.get("export_timeout_ms", 30000),
-            propagation_mode=propagation.get("mode", "lean"),
             content_capture_rate=max(0.0, min(1.0, float(eval_cfg.get("content_capture_rate", 0.0)))),
+            pii_scrub_enabled=bool(pii_cfg.get("enabled", True)),
+            pii_scrub_disable_patterns=pii_cfg.get("disable_patterns"),
+            pii_scrub_custom_patterns=pii_cfg.get("custom_patterns"),
+            pii_scrub_use_presidio=bool(pii_cfg.get("use_presidio", False)),
+            pii_scrub_replacement=str(pii_cfg.get("replacement", "[REDACTED]")),
             auto_instrument_packages=(auto_packages if auto_packages else BotanuConfig().auto_instrument_packages),
             _config_file=config_file,
         )
@@ -426,11 +456,18 @@ class BotanuConfig:
                 "delay_ms": self.schedule_delay_millis,
                 "export_timeout_ms": self.export_timeout_millis,
             },
-            "propagation": {
-                "mode": self.propagation_mode,
-            },
             "eval": {
                 "content_capture_rate": self.content_capture_rate,
+                "pii": {
+                    "enabled": self.pii_scrub_enabled,
+                    "disable_patterns": self.pii_scrub_disable_patterns,
+                    # Don't serialize custom regex bodies — they may be proprietary
+                    # business rules the customer doesn't want round-tripped through
+                    # logs. Expose only the count.
+                    "custom_pattern_count": len(self.pii_scrub_custom_patterns or {}),
+                    "use_presidio": self.pii_scrub_use_presidio,
+                    "replacement": self.pii_scrub_replacement,
+                },
             },
             "auto_instrument_packages": self.auto_instrument_packages,
         }
@@ -446,8 +483,9 @@ class BotanuConfig:
             f"deployment_environment={self.deployment_environment!r}, "
             f"otlp_endpoint={redacted_endpoint!r}, "
             f"otlp_headers={redacted_headers!r}, "
-            f"propagation_mode={self.propagation_mode!r}, "
-            f"content_capture_rate={self.content_capture_rate!r})"
+            f"content_capture_rate={self.content_capture_rate!r}, "
+            f"pii_scrub_enabled={self.pii_scrub_enabled!r}, "
+            f"pii_scrub_use_presidio={self.pii_scrub_use_presidio!r})"
         )
 
 

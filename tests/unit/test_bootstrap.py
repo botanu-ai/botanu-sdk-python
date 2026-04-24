@@ -117,30 +117,6 @@ class TestConfigBotanuEnvPrecedence:
 # ---------------------------------------------------------------------------
 
 
-class TestConfigPropagationMode:
-    """Tests for propagation mode configuration."""
-
-    def test_default_lean(self):
-        with mock.patch.dict(os.environ, {}, clear=True):
-            cfg = BotanuConfig()
-            assert cfg.propagation_mode == "lean"
-
-    def test_env_var_full(self):
-        with mock.patch.dict(os.environ, {"BOTANU_PROPAGATION_MODE": "full"}):
-            cfg = BotanuConfig()
-            assert cfg.propagation_mode == "full"
-
-    def test_env_var_lean(self):
-        with mock.patch.dict(os.environ, {"BOTANU_PROPAGATION_MODE": "lean"}):
-            cfg = BotanuConfig()
-            assert cfg.propagation_mode == "lean"
-
-    def test_invalid_propagation_mode_ignored(self):
-        with mock.patch.dict(os.environ, {"BOTANU_PROPAGATION_MODE": "invalid"}):
-            cfg = BotanuConfig()
-            assert cfg.propagation_mode == "lean"
-
-
 # ---------------------------------------------------------------------------
 # Config: auto-detect resources
 # ---------------------------------------------------------------------------
@@ -693,12 +669,11 @@ class TestBrownfieldDetection:
 
     def test_existing_sdk_provider_always_on(self):
         """When an AlwaysOn SDKTracerProvider exists, botanu migrates its processors."""
-        from opentelemetry import trace
+        from opentelemetry.sdk.resources import Resource
         from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry.sdk.trace.export import SimpleSpanProcessor
         from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
         from opentelemetry.sdk.trace.sampling import ALWAYS_ON
-        from opentelemetry.sdk.resources import Resource
 
         self._reset_bootstrap()
         try:
@@ -728,12 +703,11 @@ class TestBrownfieldDetection:
 
     def test_existing_sdk_provider_ratio_sampling(self):
         """When a ratio-sampling provider exists, botanu wraps processors in SampledSpanProcessor."""
-        from opentelemetry import trace
+        from opentelemetry.sdk.resources import Resource
         from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry.sdk.trace.export import SimpleSpanProcessor
         from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
         from opentelemetry.sdk.trace.sampling import TraceIdRatioBased
-        from opentelemetry.sdk.resources import Resource
 
         self._reset_bootstrap()
         try:
@@ -819,6 +793,7 @@ class TestBrownfieldDetection:
     def test_sampled_span_processor_deterministic(self):
         """SampledSpanProcessor produces deterministic results for the same trace_id."""
         from unittest.mock import MagicMock
+
         from botanu.processors.sampled import SampledSpanProcessor
 
         inner = MagicMock()
@@ -841,6 +816,7 @@ class TestBrownfieldDetection:
     def test_sampled_span_processor_ratio_bounds(self):
         """SampledSpanProcessor respects ratio=0.0 (drop all) and ratio=1.0 (keep all)."""
         from unittest.mock import MagicMock
+
         from botanu.processors.sampled import SampledSpanProcessor
 
         inner_zero = MagicMock()
@@ -862,6 +838,7 @@ class TestBrownfieldDetection:
         """_extract_sampler_ratio returns 1.0 for AlwaysOn sampler."""
         from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry.sdk.trace.sampling import ALWAYS_ON
+
         from botanu.sdk.bootstrap import _extract_sampler_ratio
 
         provider = TracerProvider(sampler=ALWAYS_ON)
@@ -871,6 +848,7 @@ class TestBrownfieldDetection:
         """_extract_sampler_ratio returns correct ratio for TraceIdRatioBased."""
         from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry.sdk.trace.sampling import TraceIdRatioBased
+
         from botanu.sdk.bootstrap import _extract_sampler_ratio
 
         provider = TracerProvider(sampler=TraceIdRatioBased(0.25))
@@ -881,6 +859,7 @@ class TestBrownfieldDetection:
         """_extract_sampler_ratio extracts ratio from ParentBased wrapping ratio sampler."""
         from opentelemetry.sdk.trace import TracerProvider
         from opentelemetry.sdk.trace.sampling import ParentBased, TraceIdRatioBased
+
         from botanu.sdk.bootstrap import _extract_sampler_ratio
 
         provider = TracerProvider(sampler=ParentBased(TraceIdRatioBased(0.05)))
