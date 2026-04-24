@@ -1,8 +1,12 @@
-# Botanu SDK for Python
+# botanu SDK for Python
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
 
-Event-level cost attribution for AI workflows, built on [OpenTelemetry](https://opentelemetry.io/).
+[botanu](https://botanu.ai/) is platform that helps AI companies understand the real cost of their AI features per customer, enabling outcome-based pricing and smarter scaling.
+This SDK is built on [OpenTelemetry](https://opentelemetry.io/) for event-level cost attribution for AI workflow. For more email- deborah@botanu.ai
+
+
+## Getting Started
 
 An **event** is one business transaction — resolving a support ticket, processing an order, generating a report. Each event may involve multiple **runs** (LLM calls, retries, sub-workflows) across multiple services. By correlating every run to a stable `event_id`, Botanu gives you per-event cost attribution and outcome tracking without sampling artefacts.
 
@@ -12,11 +16,11 @@ An **event** is one business transaction — resolving a support ticket, process
 pip install botanu
 ```
 
-One install. Includes the OTel SDK, the OTLP exporter, and auto-instrumentation for 50+ libraries (OpenAI, Anthropic, Vertex, LangChain, httpx, requests, SQLAlchemy, psycopg2, Redis, Celery, Kafka, boto3, and more).
-
-## Quickstart
-
-Set your API key:
+An **event** is one business transaction — resolving a support ticket, processing
+an order, generating a report. Each event may involve multiple **runs** (LLM calls,
+retries, sub-workflows) across multiple services. By correlating every run to a
+stable `event_id`, botanu gives you per-event cost attribution and outcome
+tracking without sampling artifacts.
 
 ```bash
 export BOTANU_API_KEY=<your-api-key>
@@ -111,6 +115,7 @@ See [GOVERNANCE.md](./GOVERNANCE.md) for roles, decision-making, and the contrib
 ## Security
 
 Report security vulnerabilities via [GitHub Security Advisories](https://github.com/botanu-ai/botanu-sdk-python/security/advisories/new) or see [SECURITY.md](./SECURITY.md). **Do not file a public issue.**
+
 
 ## Code of Conduct
 
