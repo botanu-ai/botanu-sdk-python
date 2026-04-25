@@ -97,7 +97,7 @@ def run(
     capture: bool = True,
 ) -> Tuple[int, str, str]:
     """Run a command and return (returncode, stdout, stderr)."""
-    result = subprocess.run(
+    result = subprocess.run(  # noqa: S603
         cmd,
         cwd=str(cwd) if cwd else None,
         env=env,
@@ -249,7 +249,7 @@ def check_api_surface(venv: Path) -> bool:
         print(DIM + (err or out)[-1500:] + RESET)
         return False
     if "MISSING:" in out and "ALL OK" not in out:
-        missing_line = [line for line in out.split("\n") if "MISSING:" in line][0]
+        missing_line = next(line for line in out.split("\n") if "MISSING:" in line)
         fail(missing_line)
         return False
     exports = [line for line in out.split("\n") if line.startswith("EXPORTS:")]
@@ -346,7 +346,7 @@ def check_smoke_test(venv: Path) -> bool:
         "OTEL_LOGS_EXPORTER": "console",
         "OTEL_METRICS_EXPORTER": "none",
     }
-    code, out, err = run([str(py), "-c", SMOKE_TEST_SCRIPT], env=env)
+    _code, out, err = run([str(py), "-c", SMOKE_TEST_SCRIPT], env=env)
     if "SMOKE_OK" in out:
         ok("decorator + outcome + validation all pass")
         return True
@@ -383,12 +383,12 @@ def main() -> int:
 
         step(3, total, "python -m build")
         if not check_build():
-            return summarize(results + [False])
+            return summarize([*results, False])
         results.append(True)
 
         step(4, total, "twine check")
         if not check_twine():
-            return summarize(results + [False])
+            return summarize([*results, False])
         results.append(True)
 
         step(5, total, "create clean venv + install wheel")
@@ -396,24 +396,24 @@ def main() -> int:
             venv_dir = make_venv()
         except RuntimeError as e:
             fail(str(e))
-            return summarize(results + [False])
+            return summarize([*results, False])
         if not check_install(venv_dir):
-            return summarize(results + [False])
+            return summarize([*results, False])
         results.append(True)
 
         step(6, total, "version string")
         if not check_version(venv_dir):
-            return summarize(results + [False])
+            return summarize([*results, False])
         results.append(True)
 
         step(7, total, "public API surface (__all__)")
         if not check_api_surface(venv_dir):
-            return summarize(results + [False])
+            return summarize([*results, False])
         results.append(True)
 
         step(8, total, "end-to-end smoke test")
         if not check_smoke_test(venv_dir):
-            return summarize(results + [False])
+            return summarize([*results, False])
         results.append(True)
 
     finally:
